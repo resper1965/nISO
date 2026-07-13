@@ -74,11 +74,11 @@ VALUES
 (hex(randomblob(16)), 'Approval', 'admin', 'Controle A.5.1 validado com base na política SGSI-POLICY-001.', '2026-07-06 10:00:00');
 
 -- 15. Gestão de Fornecedores e TPRAs (Loop 16)
-INSERT INTO vendors (id, project_id, name, service_type, trust_score, status, criticality)
+INSERT INTO vendors (id, project_id, name, category, trust_score, status)
 VALUES
-(hex(randomblob(16)), (SELECT id FROM projects LIMIT 1), 'Amazon Web Services (AWS)', 'Cloud Infrastructure', 95, 'Approved', 'Critical'),
-(hex(randomblob(16)), (SELECT id FROM projects LIMIT 1), 'GitHub', 'Source Code Management', 92, 'Approved', 'High'),
-(hex(randomblob(16)), (SELECT id FROM projects LIMIT 1), 'Linear', 'Project Management', 88, 'Approved', 'Medium');
+(hex(randomblob(16)), (SELECT id FROM projects LIMIT 1), 'Amazon Web Services (AWS)', 'Cloud Infrastructure', 95, 'Approved'),
+(hex(randomblob(16)), (SELECT id FROM projects LIMIT 1), 'GitHub', 'Source Code Management', 92, 'Approved'),
+(hex(randomblob(16)), (SELECT id FROM projects LIMIT 1), 'Linear', 'Project Management', 88, 'Approved');
 
 -- 16. Definições de Continuidade de Negócio (Loop 17)
 -- Atualizando o controle A.5.30 com metas técnicas
