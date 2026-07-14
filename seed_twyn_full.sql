@@ -261,12 +261,14 @@ INSERT INTO context_analysis (id, project_id, internal_strengths, internal_weakn
  'Liderança competitiva no mercado ao demonstrar certificação ISO 27001:2022 de biometria facial.',
  'Ataques ransomwares direcionados, vazamento acidental de chaves de acesso na AWS e autuações severas da ANPD.',
  'Lei Geral de Proteção de Dados (LGPD - Lei 13.709/2018), resoluções da ANPD sobre tratamento de dados biométricos sensíveis.',
- 'Garantia contratual com Bekaa de 99.9% de uptime e dever de comunicação de potenciais incidentes em até 48 horas.')
+ '')
 ON CONFLICT(id) DO UPDATE SET
   internal_strengths = excluded.internal_strengths,
   internal_weaknesses = excluded.internal_weaknesses,
   external_opportunities = excluded.external_opportunities,
-  external_threats = excluded.external_threats;
+  external_threats = excluded.external_threats,
+  legal_requirements = excluded.legal_requirements,
+  contractual_requirements = excluded.contractual_requirements;
 
 -- 14. Notas do Auditor Externo (Sprint E)
 INSERT INTO auditor_notes (id, project_id, auditor_token, control_id, note_type, content, response, responded_by, responded_at) VALUES
