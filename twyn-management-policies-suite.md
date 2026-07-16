@@ -24,7 +24,7 @@ Fica constituído o comitê permanente de resposta com os seguintes papéis:
 3.  **Classificação de Severidade**:
     *   **P0/P1 (Crítico/Alto)**: Vazamento de chaves mestras KMS, hashes biométricos de produção comprometidos ou indisponibilidade total da API.
     *   **P2/P3 (Médio/Baixo)**: Vulnerabilidades internas descobertas em dependências ou falhas parciais em sandbox.
-4.  **Notificação ANPD em 72 Horas**: Em caso de incidentes P0/P1 que envolvam risco ou danos relevantes aos direitos dos titulares de dados pessoais, o DPO Ricardo Esper deve formalizar a notificação à ANPD em até 72 horas úteis da ciência do fato.
+4.  **Notificação ANPD em 2 Dias Úteis**: Em caso de incidentes P0/P1 que envolvam risco ou danos relevantes aos direitos dos titulares de dados pessoais, o DPO Ricardo Esper deve formalizar a notificação à ANPD em até 2 dias úteis da ciência do fato.
 
 ---
 

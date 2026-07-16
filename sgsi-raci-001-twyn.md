@@ -6,7 +6,7 @@
 | Campo | Valor |
 |-------|-------|
 | **Document ID** | SGSI-RACI-001 |
-| **Version** | 1.0 (Oficial) |
+| **Version** | 1.1 (Ajustado pós Auditoria Interna) |
 | **Elaborado por** | Ricardo Esper (DPO & Consultor Perito) |
 | **Aprovado por** | Kacio Lopes (CEO) |
 | **Data de Publicação** | 16/07/2026 |
@@ -86,14 +86,14 @@ A Matriz RACI define os papéis envolvidos nas principais atividades do sistema 
 *   **C** - Consulted (Quem é consultado/aporta insumos)
 *   **I** - Informed (Quem é informado sobre a conclusão)
 
-| Processo / Atividade do SGSI | CEO (Kacio) | DPO/Perito (Ricardo) | DevOps (Augusto) | CTO (Nizar) | COO (Rosa) |
-|------------------------------|-------------|-----------------------|------------------|-------------|------------|
-| Aprovação de Políticas de SI | **A**       | **R**                 | **C**            | **C**       | **I**      |
-| Análise e Tratamento de Risco| **A**       | **R**                 | **R**            | **C**       | **I**      |
-| Segurança na AWS / IaC       | **I**       | **C**                 | **R** / **A**    | **C**       | **I**      |
-| Codificação Segura (API)     | **I**       | **C**                 | **I**            | **R** / **A**| **I**      |
-| Registro ROPA (Privacidade)  | **I**       | **R** / **A**         | **C**            | **I**       | **C**      |
-| Resposta a Incidentes (ANPD) | **A**       | **R**                 | **R**            | **C**       | **C**      |
-| Offboarding de Colaboradores | **I**       | **I**                 | **R**            | **I**       | **R** / **A**|
-| Auditorias Internas          | **A**       | **R**                 | **C**            | **C**       | **I**      |
-| Ações Corretivas (CAPAs)     | **I**       | **A**                 | **R**            | **R**       | **I**      |
+| Processo / Atividade do SGSI | CEO (Kacio) | DPO/Perito (Ricardo) | DevOps (Augusto) | CTO (Nizar) | COO (Rosa) | Auditor Terceiro (Marcia) |
+|------------------------------|-------------|-----------------------|------------------|-------------|------------|---------------------------|
+| Aprovação de Políticas de SI | **A**       | **R**                 | **C**            | **C**       | **I**      | **I**                      |
+| Análise e Tratamento de Risco| **A**       | **R**                 | **R**            | **C**       | **I**      | **I**                      |
+| Segurança na AWS / IaC       | **I**       | **C**                 | **R** / **A**    | **C**       | **I**      | **I**                      |
+| Codificação Segura (API)     | **I**       | **C**                 | **I**            | **R** / **A**| **I**      | **I**                      |
+| Registro ROPA (Privacidade)  | **I**       | **R** / **A**         | **C**            | **I**       | **C**      | **I**                      |
+| Resposta a Incidentes (ANPD) | **A**       | **R**                 | **R**            | **C**       | **C**      | **I**                      |
+| Offboarding de Colaboradores | **I**       | **I**                 | **R**            | **I**       | **R** / **A**| **I**                      |
+| Auditorias Internas          | **A**       | **C**                 | **C**            | **C**       | **I**      | **R**                      |
+| Ações Corretivas (CAPAs)     | **I**       | **A**                 | **R**            | **R**       | **I**      | **C**                      |
