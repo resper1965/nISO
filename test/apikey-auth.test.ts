@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { authorizeApiKey } from '../src/auth-policy';
+import { authorizeApiKey, isCrossProjectResource } from '../src/auth-policy';
 
 // Testa a decisão de autorização por papel de API key (função pura).
 describe('authorizeApiKey — separação de papéis', () => {
@@ -51,6 +51,21 @@ describe('authorizeApiKey — separação de papéis', () => {
     });
     it('chave sem escopo aceita o portfólio', () => {
       expect(authorizeApiKey('consultor', null, 'GET', '/api/v1/portfolio').ok).toBe(true);
+    });
+  });
+
+  describe('escopo por recurso (evidência/achado/nota)', () => {
+    it('chave de PROJ-1 barra recurso de PROJ-2', () => {
+      expect(isCrossProjectResource(true, 'PROJ-1', 'PROJ-2')).toBe(true);
+    });
+    it('chave de PROJ-1 aceita recurso de PROJ-1', () => {
+      expect(isCrossProjectResource(true, 'PROJ-1', 'PROJ-1')).toBe(false);
+    });
+    it('chave sem escopo não barra nada', () => {
+      expect(isCrossProjectResource(true, null, 'PROJ-2')).toBe(false);
+    });
+    it('login humano (não é apikey) nunca é barrado por escopo de key', () => {
+      expect(isCrossProjectResource(false, 'PROJ-1', 'PROJ-2')).toBe(false);
     });
   });
 });

@@ -47,3 +47,16 @@ export function authorizeApiKey(
   }
   return { ok: false, error: 'Forbidden: papel de API key desconhecido' };
 }
+
+/**
+ * Verdadeiro quando uma chave de agente presa a um projeto tenta agir sobre um
+ * recurso de OUTRO projeto (evidência, achado, nota) — cujo path não expõe o
+ * projectId. Usado nos endpoints por recurso onde o escopo do middleware não chega.
+ */
+export function isCrossProjectResource(
+  viaApiKey: boolean,
+  clientProjectId: string | null,
+  resourceProjectId: string | null | undefined
+): boolean {
+  return !!(viaApiKey && clientProjectId && resourceProjectId && resourceProjectId !== clientProjectId);
+}

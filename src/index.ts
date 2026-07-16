@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { serveStatic } from 'hono/cloudflare-workers';
 import { calculatePricing, DEFAULT_FINANCIAL_MODEL } from './services/pricing';
-import { authorizeApiKey } from './auth-policy';
+import { authorizeApiKey, isCrossProjectResource } from './auth-policy';
 import { PolicyAgent } from './agents/policy';
 import { EvidenceAgent } from './agents/evidence';
 import { MemoryService } from './services/memory';
@@ -580,6 +580,19 @@ async function resolveApiKey(c: any, token: string): Promise<any | null> {
     email: `apikey:${row.id}`,
     client_project_id: row.project_id || null,
   };
+}
+
+/**
+ * Barra recurso de outro projeto para chaves de agente presas a um projeto.
+ * Usar em endpoints cujo path não expõe o projectId (evidência, achado, nota) —
+ * o escopo de projeto do middleware não os cobre. Retorna Response 403 ou null.
+ */
+function keyProjectViolation(c: any, resourceProjectId: string | null | undefined) {
+  const user = c.get('user');
+  if (isCrossProjectResource(user?.via === 'apikey', user?.client_project_id || null, resourceProjectId)) {
+    return c.json({ error: 'Forbidden: recurso pertence a outro projeto (escopo da API key)' }, 403);
+  }
+  return null;
 }
 
 async function hashPassword(password: string, salt?: string): Promise<string> {
@@ -2855,6 +2868,8 @@ app.post('/api/v1/evidence/:id/evaluate', async (c) => {
 
     const evidence = await c.env.DB.prepare('SELECT * FROM evidence WHERE id = ?').bind(evidenceId).first<any>();
     if (!evidence) return c.json({ error: 'Evidência não encontrada' }, 404);
+    const evScope = keyProjectViolation(c, evidence.project_id);
+    if (evScope) return evScope;
 
     // Buscar controle associado
     let controlRef = '';
@@ -4839,6 +4854,8 @@ app.post('/api/v1/audits/:auditId/findings', async (c) => {
     const auditId = c.req.param('auditId');
     const { project_id, control_id, finding_type, description, evidence_reviewed, auditor_notes } = await c.req.json();
     if (!description) return c.json({ error: 'description is required' }, 400);
+    const fScope = keyProjectViolation(c, project_id);
+    if (fScope) return fScope;
     
     const findingId = crypto.randomUUID().replace(/-/g, '').substring(0, 16);
     let capaId: string | null = null;
