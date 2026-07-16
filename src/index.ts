@@ -3,6 +3,7 @@ import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { serveStatic } from 'hono/cloudflare-workers';
 import { calculatePricing, DEFAULT_FINANCIAL_MODEL } from './services/pricing';
+import { authorizeApiKey } from './auth-policy';
 import { PolicyAgent } from './agents/policy';
 import { EvidenceAgent } from './agents/evidence';
 import { MemoryService } from './services/memory';
@@ -437,13 +438,18 @@ app.use('/api/v1/*', async (c, next) => {
   }
   
   const token = authHeader.split(' ')[1];
+  // Login humano (KV SESSIONS) tem precedência; se não houver, tenta API key.
   const userJson = await c.env.SESSIONS.get(token);
-  
-  if (!userJson) {
-    return c.json({ error: 'Unauthorized: Invalid or expired token' }, 401);
+
+  let user: any;
+  if (userJson) {
+    user = JSON.parse(userJson);
+  } else {
+    user = await resolveApiKey(c, token);
+    if (!user) {
+      return c.json({ error: 'Unauthorized: Invalid or expired token' }, 401);
+    }
   }
-  
-  const user = JSON.parse(userJson);
   
   // ponytail: compatibility mapping for legacy roles
   if (user.role === 'admin') {
@@ -461,6 +467,18 @@ app.use('/api/v1/*', async (c, next) => {
   }
   
   c.set('user', user);
+
+  // ── Autorização de API key (agentes): papel + escopo de projeto ──────────────
+  // Chaves de agente têm papel próprio e são tratadas aqui, sem cair na lógica de
+  // papéis humanos. A decisão é uma função pura (authorizeApiKey) — testável.
+  if (user.via === 'apikey') {
+    const decision = authorizeApiKey(user.role, user.client_project_id || null, c.req.method, path);
+    if (!decision.ok) {
+      return c.json({ error: decision.error }, 403);
+    }
+    await next();
+    return;
+  }
 
   // platform_admin (acesso total)
   if (user.role === 'platform_admin') {
@@ -526,6 +544,43 @@ app.use('/api/v1/*', async (c, next) => {
 });
 
 // ─── Helpers de Auth ────────────────────────────────────────────────────────
+
+/**
+ * Resolve um Bearer token como API key (tabela api_keys). Retorna o contexto de
+ * usuário sintético (papel + escopo de projeto) ou null se inválida/expirada/revogada.
+ * O hash é SHA-256 hex do token em claro — mesmo algoritmo do endpoint de criação.
+ */
+async function resolveApiKey(c: any, token: string): Promise<any | null> {
+  const keyBytes = new TextEncoder().encode(token);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', keyBytes);
+  const keyHash = [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+  const row = await c.env.DB.prepare(
+    'SELECT id, project_id, permissions, status, expires_at FROM api_keys WHERE key_hash = ?'
+  ).bind(keyHash).first() as any;
+
+  if (!row) return null;
+  if (row.status && row.status !== 'Active') return null;
+  if (row.expires_at && new Date(row.expires_at).getTime() < Date.now()) return null;
+
+  const perm = String(row.permissions || 'read').toLowerCase();
+  const role =
+    perm === 'consultant' || perm === 'consultor' ? 'consultor' :
+    perm === 'auditor' ? 'auditor' :
+    'apikey_readonly';
+
+  // last_used_at: melhor esforço, não bloqueia a request.
+  c.env.DB.prepare('UPDATE api_keys SET last_used_at = ? WHERE id = ?')
+    .bind(new Date().toISOString(), row.id).run().catch(() => {});
+
+  return {
+    role,
+    via: 'apikey',
+    apikey_id: row.id,
+    email: `apikey:${row.id}`,
+    client_project_id: row.project_id || null,
+  };
+}
 
 async function hashPassword(password: string, salt?: string): Promise<string> {
   const s = salt || crypto.randomUUID();
@@ -4400,6 +4455,11 @@ app.post('/api/v1/webhooks/test/:id', async (c) => {
 app.post('/api/v1/projects/:id/api-keys', async (c) => {
   const projectId = c.req.param('id');
   const body = await c.req.json();
+  // Papel da chave: consultant (implementação) | auditor (achados/notas) | read (só leitura).
+  const permission = String(body.permissions || 'read').toLowerCase();
+  if (!['consultant', 'auditor', 'read'].includes(permission)) {
+    return c.json({ error: "permissions inválido. Use 'consultant', 'auditor' ou 'read'." }, 400);
+  }
   const id = crypto.randomUUID();
   const plainKey = crypto.randomUUID() + '-' + crypto.randomUUID();
   const keyBytes = new TextEncoder().encode(plainKey);
@@ -4410,7 +4470,7 @@ app.post('/api/v1/projects/:id/api-keys', async (c) => {
   await c.env.DB.prepare(
     `INSERT INTO api_keys (id, project_id, key_hash, name, permissions, expires_at, status, created_at)
      VALUES (?, ?, ?, ?, ?, ?, 'Active', ?)`
-  ).bind(id, projectId, keyHash, body.name, body.permissions || 'read', body.expires_at || null, now).run();
+  ).bind(id, projectId, keyHash, body.name, permission, body.expires_at || null, now).run();
 
   const user = c.get('user');
   await c.env.DB.prepare('INSERT INTO audit_logs (id, action, actor, details) VALUES (?, ?, ?, ?)').bind(crypto.randomUUID(), 'api_key_created', user.email, `API key ${id} created`).run();
