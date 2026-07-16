@@ -29,7 +29,7 @@
     *   Conduzir e auditar os processos de adequação às normas ISO 27001 e ISO 27701.
     *   Elaborar e atualizar o Registro de Operações de Tratamento (ROPA).
     *   Coordenar as investigações de violações de privacidade e elaborar Relatórios de Impacto (DPIA/RIPD).
-    *   Executar o planejamento de Auditorias Internas.
+    *   Coordenar o cronograma e apoiar o ciclo de Auditorias Internas (como interface consultada).
 
 ### 1.3 DevOps Cloud Lead — Augusto Ferronato
 *   **Papel**: Líder de Infraestrutura e Segurança em Nuvem.
@@ -75,6 +75,12 @@
 *   **Papel**: Alinhamento de Produto com Privacy by Design.
 *   **Responsabilidades**:
     *   Garantir que novos recursos da API Face ID sigam os princípios de minimização de dados e Privacy by Design desde a fase de conceito.
+
+### 1.10 Auditoria Interna Independente — Marcia Torres
+*   **Papel**: Auditor Líder Independente do SGSI/SGPI.
+*   **Responsabilidades**:
+    *   Planejar, conduzir e reportar de forma independente as auditorias internas periódicas do SGSI/SGPI (Cláusula 9.2).
+    *   Garantir a imparcialidade e objetividade do processo de auditoria, reportando os achados diretamente ao CEO (Kacio Lopes) e ao Comitê.
 
 ---
 
