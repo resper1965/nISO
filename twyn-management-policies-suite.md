@@ -26,6 +26,25 @@ Fica constituído o comitê permanente de resposta com os seguintes papéis:
     *   **P2/P3 (Médio/Baixo)**: Vulnerabilidades internas descobertas em dependências ou falhas parciais em sandbox.
 4.  **Notificação ANPD em 2 Dias Úteis**: Em caso de incidentes P0/P1 que envolvam risco ou danos relevantes aos direitos dos titulares de dados pessoais, o DPO Ricardo Esper deve formalizar a notificação à ANPD em até 2 dias úteis da ciência do fato.
 
+### 1.4 Workflow de Resposta a Incidentes (Controle A.5.26)
+O comitê CSIRT deve seguir as 5 fases obrigatórias de resposta a incidentes:
+1. **Triagem e Análise**: Confirmar se o evento constitui um incidente real de segurança, avaliar a severidade (P0-P3) e registrar no log interno do CSIRT.
+2. **Contenção**: Executar o bloqueio imediato do vetor de ataque (ex: revogação de acessos via AWS IAM, isolamento de subredes).
+3. **Erradicação**: Identificar e eliminar a causa raiz (ex: remoção de malware, correção de vulnerabilidades em código ou configuração).
+4. **Recuperação e Restabelecimento**: Restaurar os serviços a partir de backups limpos e monitorar tráfego para confirmar a estabilidade.
+5. **Pós-Mortem e Aprendizado**: Elaborar relatório detalhado de lições aprendidas em até 5 dias úteis, atualizando controles do SGSI para prevenir recorrência.
+
+### 1.5 Procedimento de Contato com Autoridades (Controle A.5.5)
+O DPO Ricardo Esper mantém a matriz oficial de contatos de autoridades externas para notificações rápidas:
+1. **ANPD (Autoridade Nacional de Proteção de Dados)**: Notificação via peticionamento eletrônico no portal Gov.br (SLA de 2 dias úteis para incidentes envolvendo PII biométrica).
+2. **Autoridades Policiais / Polícia Civil (Cibercrimes)**: Registro de Boletim de Ocorrência imediato em caso de intrusão externa maliciosa.
+3. **Órgãos Reguladores Financeiros (se aplicável)**: Notificação a clientes B2B do setor financeiro para cumprimento de normas do Banco Central do Brasil.
+
+### 1.6 Contato com Grupos Especiais de Interesse (Controle A.5.6)
+A TWYN mantém participação ativa e canais de comunicação com grupos de segurança para compartilhamento de inteligência de ameaças:
+1. **CERT.br (Centro de Estudos, Resposta e Tratamento de Incidentes de Segurança no Brasil)**: Envio de relatórios de incidentes ou tentativas de intrusão para cooperação em escala nacional.
+2. **ISC2 / ANPPD**: Participação e consulta técnica ativa dos profissionais de segurança do time para atualização de melhores práticas regulatórias e de segurança lógica.
+
 ---
 
 # 2. Política de Proteção de Dados e Privacidade (DPP) — Controle A.5.34
@@ -79,11 +98,84 @@ Mitigar os riscos decorrentes de vulnerabilidades técnicas em sistemas operacio
 
 ---
 
-## 5. Controle de Documento e Aprovações
+# 5. Política de Classificação e Proteção de Registros (DCP) — Controles A.5.12, A.5.13 e A.5.33
+
+**Document ID:** POL-DCP-001 | **Classification:** Internal | **Version:** 1.0
+
+### 5.1 Objetivo
+Definir as regras para classificação, rotulagem e retenção segura de dados biométricos sensíveis e de negócios na Face ID Platform, garantindo a conformidade regulatória.
+
+### 5.2 Diretrizes de Classificação e Rotulagem (A.5.12, A.5.13)
+1. **Classificação de Informações**: As informações tratadas pela TWYN são classificadas em quatro níveis de criticidade:
+   * **Pública**: Informações de marketing e documentação pública da API.
+   * **Uso Interno**: Comunicações internas e processos operacionais de rotina.
+   * **Confidencial**: Código-fonte da API, logs de infraestrutura e diagramas de rede.
+   * **Altamente Confidencial (Sensível)**: Hashes de templates biométricos e chaves mestras de criptografia KMS.
+2. **Rotulagem de Dados (Labelling)**: Todo documento do SGSI/SGPI e repositório Git deve conter metadados e marcas textuais que identifiquem explicitamente sua classificação. Dados Altamente Confidenciais biométricos devem possuir tags específicas na base de dados (`DataClassification = PII_Sensitive`).
+
+### 5.3 Retenção e Proteção de Registros (A.5.33)
+1. **Período de Retenção**:
+   * Hashes biométricos de produção (Templates): Retidos durante a vigência do contrato comercial com o cliente B2B parceiro, devendo ser eliminados em até 15 dias após o término da relação ou solicitação de exclusão do titular.
+   * Logs de Auditoria (CloudTrail/D1 access): Retidos por 1 ano para fins de auditoria de conformidade.
+2. **Descarte Seguro**: A eliminação de dados de produção biométricos deve ser realizada via expurgo lógico definitivo na base de dados com sobrescrita criptográfica (exclusão lógica e destruição de chaves de acesso), gerando logs de deleção.
+
+---
+
+# 6. Política de Segurança em Fornecedores (VMP) — Controles A.5.21 e A.5.22
+
+**Document ID:** POL-VMP-002 | **Classification:** Internal | **Version:** 1.0
+
+### 6.1 Objetivo
+Garantir que a segurança da informação e privacidade de dados da TWYN sejam mantidas na contratação e gestão de serviços de fornecedores e parceiros de TIC (Tecnologia da Informação e Comunicação).
+
+### 6.2 Diligência e Gestão de Fornecedores (A.5.21)
+1. **Formulário de Qualificação (KYV)**: Todos os fornecedores críticos de infraestrutura (provedores SaaS, cloud, serviços de e-mail e mensageria) devem passar por qualificação prévia de segurança, respondendo ao questionário KYV (Know Your Vendor).
+2. **Requisitos Mínimos**: São priorizados fornecedores de TIC certificados na norma ISO/IEC 27001 ou que possuam relatório SOC 2 Tipo II vigente.
+
+### 6.3 Monitoramento e Auditoria de Contratos (A.5.22)
+1. **Revisões Periódicas**: O CFO Enes Degasperi deve revisar anualmente os contratos de fornecedores de TIC para verificar a manutenção dos Acordos de Nível de Serviço (SLAs) e das cláusulas de privacidade (DPA).
+2. **Direito a Auditoria**: Contratos com parceiros e terceirizados de desenvolvimento devem prever o direito da TWYN de conduzir auditorias de segurança lógica amostrais nos processos integrados.
+
+---
+
+# 7. Política de Segurança em Recursos Humanos — Controle A.5.11, A.6.5 e A.6.6
+
+**Document ID:** POL-HR-001 | **Classification:** Internal | **Version:** 1.0
+
+### 7.1 Devolução de Ativos (A.5.11)
+Todos os colaboradores e terceiros que encerrarem seu vínculo com a TWYN devem devolver todos os ativos da empresa sob sua posse (notebooks, tokens, chaves criptográficas e mídias de armazenamento) em até 2 dias úteis após o encerramento do contrato.
+
+### 7.2 Responsabilidades após o Término (A.6.5)
+1. **Checklist de Offboarding**: O RH deve conduzir um checklist de desligamento formal, garantindo que o DevOps Cloud revogue todas as credenciais e acessos lógicos (SSO, AWS, e-mail) do colaborador desligado em até 2 horas úteis da rescisão.
+2. **Revisão de Sigilo**: Deve ser realizada entrevista de desligamento formalizando os deveres de sigilo contínuos sobre dados biométricos sensíveis de que o colaborador teve ciência.
+
+### 7.3 Termos de Confidencialidade e NDAs (A.6.6)
+É obrigatória a assinatura de Acordos de Confidencialidade (NDAs) por todos os funcionários, prestadores de serviço e desenvolvedores terceirizados no momento de sua integração à empresa (onboarding), com validade de no mínimo 5 anos pós-desligamento.
+
+---
+
+# 8. Política de Governança Gerencial e Projetos — Controle A.5.4 e A.5.8
+
+**Document ID:** POL-GOV-001 | **Classification:** Internal | **Version:** 1.0
+
+### 8.1 Responsabilidades da Direção (A.5.4)
+1. **Suporte Ativo**: A gerência executiva da TWYN (CEO, CFO e CTO) deve apoiar ativamente o SGSI/SGPI, garantindo recursos financeiros e infraestrutura física e lógica para a manutenção dos controles de segurança.
+2. **Revisões Trimestrais**: O comitê de segurança deve se reunir trimestralmente para revisar incidentes, riscos e aprovar novas diretivas.
+
+### 8.2 Segurança em Gestão de Projetos (A.5.8)
+A segurança da informação deve ser integrada formalmente ao ciclo de vida de qualquer projeto de desenvolvimento ou melhoria da API Face ID:
+* Todo projeto no Jira deve conter uma subtask de avaliação de impactos à segurança e privacidade de dados pessoais biométricos.
+* Alterações de arquitetura na AWS devem possuir aprovação prévia em termos de compliance antes do provisionamento.
+
+---
+
+## 9. Controle de Documento e Aprovações
 
 | Versão | Data de Revisão | Descrição do Ajuste | Autor | Aprovado por |
 |--------|-----------------|---------------------|-------|--------------|
 | 1.0    | 16/07/2026      | Criação e assinatura do comitê | Ricardo Esper (DPO) | Kacio Lopes (CEO) |
+| 1.1    | 16/07/2026      | Inclusão das políticas de Classificação de Dados e Fornecedores | Ricardo Esper (DPO) | Kacio Lopes (CEO) |
+| 1.2    | 16/07/2026      | Inclusão de políticas de RH, IRP expandida e Governança | Ricardo Esper (DPO) | Kacio Lopes (CEO) |
 
 ---
 **Status:** Approved | **Data da Próxima Revisão:** 16/07/2027

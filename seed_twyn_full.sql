@@ -24,7 +24,7 @@ DELETE FROM projects WHERE id = 'mr9c1qugo16zic2eko';
 
 -- 0. Usuário admin
 INSERT INTO users (id, email, password_hash, role, name) VALUES
-('admin', 'admin@ness.io', '$2a$10$placeholder', 'admin', 'Admin ness.')
+('admin', 'admin@ness.io', '9a459b7d-e973-46da-8eb2-1d1b094bed0f:1be547fe40d3cbedca0fe6f754631af7af28f1c2572ba1a4478a19f2c6395bb2', 'admin', 'Admin ness.')
 ON CONFLICT(id) DO NOTHING;
 
 -- 1. Projeto TWYN (ID real de produção)
