@@ -76,7 +76,7 @@
 *   **Responsabilidades**:
     *   Garantir que novos recursos da API Face ID sigam os princípios de minimização de dados e Privacy by Design desde a fase de conceito.
 
-### 1.10 Auditoria Interna Independente — Marcia Torres
+### 1.10 Auditoria Interna Independente — Monica Yoshida
 *   **Papel**: Auditor Líder Independente do SGSI/SGPI.
 *   **Responsabilidades**:
     *   Planejar, conduzir e reportar de forma independente as auditorias internas periódicas do SGSI/SGPI (Cláusula 9.2).
@@ -92,7 +92,7 @@ A Matriz RACI define os papéis envolvidos nas principais atividades do sistema 
 *   **C** - Consulted (Quem é consultado/aporta insumos)
 *   **I** - Informed (Quem é informado sobre a conclusão)
 
-| Processo / Atividade do SGSI | CEO (Kacio) | DPO/Perito (Ricardo) | DevOps (Augusto) | CTO (Nizar) | COO (Rosa) | Auditor Terceiro (Marcia) |
+| Processo / Atividade do SGSI | CEO (Kacio) | DPO/Perito (Ricardo) | DevOps (Augusto) | CTO (Nizar) | COO (Rosa) | Auditor Terceiro (Monica) |
 |------------------------------|-------------|-----------------------|------------------|-------------|------------|---------------------------|
 | Aprovação de Políticas de SI | **A**       | **R**                 | **C**            | **C**       | **I**      | **I**                      |
 | Análise e Tratamento de Risco| **A**       | **R**                 | **R**            | **C**       | **I**      | **I**                      |
