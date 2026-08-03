@@ -133,11 +133,39 @@ window.doMfaActivate = async function doMfaActivate() {
   mostraErro('mfa-erro', '');
   try {
     const r = await api('POST', '/api/v1/auth/mfa/activate', { codigo });
-    telaCodigosRecuperacao(r.recovery_codes);
+    // `api()` desembrulha respostas `{ ok:true, X:[...] }` e devolve o ARRAY
+    // direto — então aqui `r` já é a lista, e `r.recovery_codes` seria
+    // undefined. Aceitar as duas formas evita depender desse detalhe: exibir
+    // uma lista vazia aqui perderia os códigos para sempre, porque o servidor
+    // guarda só o SHA-256 e nunca os mostra de novo.
+    const codigos = Array.isArray(r) ? r : (r && r.recovery_codes) || [];
+    if (!codigos.length) return telaSemCodigos();
+    telaCodigosRecuperacao(codigos);
   } catch (e) {
     mostraErro('mfa-erro', e.message);
   }
 };
+
+/**
+ * O MFA ligou mas os códigos não vieram. Falha rara, e cara: sem eles, perder o
+ * celular vira perder a conta. Melhor dizer isso em voz alta do que mostrar uma
+ * caixa vazia e deixar o usuário achar que está tudo bem.
+ */
+function telaSemCodigos() {
+  openModal(`<div style="${CAIXA}">
+    <h3 style="${TITULO}">Segundo fator ativado — sem códigos de recuperação</h3>
+    <p style="${AJUDA}">
+      O segundo fator está <strong>ativo</strong>, mas os códigos de recuperação não
+      chegaram nesta resposta e não podem ser recuperados depois.
+    </p>
+    <p style="${AJUDA}">
+      <strong>Desative e ative de novo</strong> para gerar uma lista nova, e anote-a
+      antes de fechar. Sem os códigos, perder o acesso ao autenticador significa
+      perder a conta.
+    </p>
+    <button class="btn btn-primary" onclick="openSecurityModal()">Gerenciar segundo fator</button>
+  </div>`);
+}
 
 /**
  * Códigos de recuperação — exibidos UMA vez.

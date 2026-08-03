@@ -139,6 +139,11 @@ window.doLogin = async function doLogin() {
                 document.getElementById('mfa-login-error').textContent = '';
                 document.getElementById('mfa-login-code').value = '';
                 document.getElementById('mfa-login-code').focus();
+                // Uma conta pode exigir as DUAS coisas: segundo fator e troca de
+                // senha temporária. O segundo fator vem primeiro, mas a troca não
+                // pode se perder no caminho — senão a senha provisória vira
+                // definitiva e a tela obrigatória nunca mais aparece.
+                window._pendenteTrocaSenha = !!res.requiresPasswordChange;
             } else if (res.requiresPasswordChange) {
                 document.getElementById('standard-login-box').style.display = 'none';
                 document.getElementById('first-login-reset-box').style.display = 'block';
@@ -171,6 +176,18 @@ window.doMfaLogin = async function doMfaLogin() {
             // O backend reescreveu a sessão removendo `mfa_pending`; o token é o
             // mesmo, então não há nada a regravar no localStorage.
             document.getElementById('mfa-login-box').style.display = 'none';
+
+            // Retoma a troca obrigatória de senha, se havia. Entrar direto aqui
+            // deixaria a conta usando a senha temporária para sempre.
+            if (window._pendenteTrocaSenha) {
+                window._pendenteTrocaSenha = false;
+                document.getElementById('standard-login-box').style.display = 'none';
+                document.getElementById('first-login-reset-box').style.display = 'block';
+                document.getElementById('first-reset-error').style.display = 'none';
+                document.getElementById('first-new-password').focus();
+                return;
+            }
+
             document.getElementById('standard-login-box').style.display = 'block';
             document.getElementById('login-overlay').classList.add('hidden');
             initApp();
@@ -183,6 +200,7 @@ window.doMfaLogin = async function doMfaLogin() {
 /** Volta do segundo fator para o login: a sessão pendente não serve para nada. */
 window.cancelMfaLogin = function cancelMfaLogin() {
         S.token = null; S.user = null;
+        window._pendenteTrocaSenha = false;
         localStorage.removeItem('niso_token');
         localStorage.removeItem('niso_user');
         document.getElementById('mfa-login-box').style.display = 'none';
