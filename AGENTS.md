@@ -28,10 +28,26 @@ Entao:
     https://niso.ness.workers.dev/api/v1/auth/login
   ```
 
-  Codigo atual devolve `[{"path":"email","message":"Invalid input: ..."}]`.
-  Formato antigo devolvia `"received":"undefined"` com `"message":"Required"`.
+  Codigo atual devolve o envelope completo:
+
+  ```json
+  {"error":"Payload invalido","details":[
+    {"path":"email","message":"Invalid input: expected string, received undefined"},
+    {"path":"password","message":"Invalid input: expected string, received undefined"}]}
+  ```
+
+  Formato anterior ao #34 devolvia os `issues` crus do zod dentro de `details`,
+  com `"code"`, `"expected"`, `"received":"undefined"` e `"message":"Required"`.
+  O que distingue e a forma de cada item, nao o envelope — `error` e `details`
+  existem nos dois. `test/validation-contract.test.ts` fixa esse contrato.
 
 Cole a saida. Sem saida colada, a afirmacao nao conta.
+
+E vale para contagem tambem: o PR que introduziu esta regra afirmou "46 tabelas"
+porque `grep -c 'CREATE TABLE'` contou duas linhas de COMENTARIO, e "7 de 23
+testes mockam o D1" porque `grep vi.fn()` casa mock de qualquer coisa. Os
+numeros certos eram 44 e 2 de 22. `grep` conveniente nao e evidencia — confira o
+que o padrao realmente casou antes de escrever o numero.
 
 ## Stack
 
@@ -53,7 +69,7 @@ Vanilla JS, sem framework, bundle via Vite. Deploy por `wrangler deploy`.
   Entrada `frontend/index.html` + `src/main.js`; `router.js`, `state.js`
   (estado global `S`), `api.js`, `ui.js`, `globals.js`, `src/views/*.js`.
   `politicas.html` e o portal publico de politicas.
-- **Schema**: `schema.sql` — **46 tabelas**. Migrations numeradas em
+- **Schema**: `schema.sql` — **44 tabelas**. Migrations numeradas em
   `migrations/`, ultima a **0020**. O estado real de producao e o historico da
   reconciliacao de 2026-08 estao em `migrations/README.md` — leia antes de
   tocar em migration.
@@ -101,10 +117,11 @@ Ao mexer nestas areas, voce esta em terreno que ja falhou antes:
 
 - **~300 `any` em `src/`.** `tsc --noEmit` limpo diz pouco. Tipar o que voce
   tocar e melhoria barata; nao precisa de permissao.
-- **7 de 23 arquivos de teste ainda mockam o D1.** Teste mockado nao pega deriva
-  de schema — foi exatamente assim que o codebase acumulou consulta a tabela
-  inexistente. Caminho novo de banco: teste de integracao real, no estilo de
-  `test/schema-contract.test.ts`.
+- **2 de 22 arquivos de teste ainda mockam o D1**: `test/integration.test.ts` e
+  `test/mcp-integration.test.ts`. Os outros 14 que tocam banco usam o D1 real do
+  `cloudflare:test`. Teste mockado nao pega deriva de schema — foi exatamente
+  assim que o codebase acumulou consulta a tabela inexistente. Caminho novo de
+  banco: teste de integracao real, no estilo de `test/schema-contract.test.ts`.
 - **Frontend com quase nenhum teste** (~12k linhas). `test/e2e/` cobre so o fluxo
   de MFA, roda fora do `npm test` e exige servidor e navegador. Todo o resto da
   interface nao tem cobertura nenhuma.
