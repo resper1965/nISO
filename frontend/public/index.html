@@ -92,9 +92,9 @@
     <nav class="nav">
         <div class="nav-logo">ness.</div>
         <div class="nav-links">
-            <a href="#features">Features</a>
+            <a href="#features">Recursos</a>
             <a href="#how-it-works">Como funciona</a>
-            <a href="#pricing">Pricing</a>
+            <a href="#pricing">Preços</a>
             <button class="btn-login" onclick="window.location.href='/login'">Entrar</button>
         </div>
     </nav>
@@ -102,10 +102,10 @@
     <section class="hero">
         <span class="hero-badge fade-up">ISO 27001:2022 + ISO 27701</span>
         <h1 class="fade-up delay-1">compliance <span>agentico</span><br>para sua organizacao</h1>
-        <p class="fade-up delay-2">n.iso automatiza todo o ciclo GRC — do assessment a certificacao — usando inteligencia artificial na edge. Deploy em Cloudflare Workers, latencia global sub-50ms.</p>
+        <p class="fade-up delay-2">n.iso automatiza todo o ciclo GRC — do assessment a certificacao — usando inteligencia artificial na edge, rodando 100% em Cloudflare Workers.</p>
         <div class="hero-cta fade-up delay-3">
             <button class="btn-primary" onclick="window.location.href='/login'">Entrar</button>
-            <button class="btn-ghost" onclick="document.getElementById('features').scrollIntoView()">Ver features</button>
+            <button class="btn-ghost" onclick="document.getElementById('features').scrollIntoView()">Ver recursos</button>
         </div>
         <!-- Só números conferidos no código nesta sessão: 93 vem de
              `soa-logic.ts:1` (comentário "93 rules") e de AGENTS.md
@@ -127,42 +127,42 @@
         </div>
         <div class="features-grid">
             <div class="feature-card fade-up">
-                <div class="feature-tag">AI Agents</div>
+                <div class="feature-tag">Agentes de IA</div>
                 <h3>PolicyAgent + EvidenceAgent</h3>
                 <p>Gere politicas ISO completas e avalie evidencias automaticamente via IA na edge. RAG com memoria de longo prazo via Vectorize.</p>
             </div>
             <div class="feature-card fade-up delay-1">
-                <div class="feature-tag">Compliance</div>
+                <div class="feature-tag">Conformidade</div>
                 <h3>SoA com 93 regras ISO 27001:2022</h3>
                 <p>Motor de logica com todas as regras do Annex A. Gera Statement of Applicability e controles automaticamente.</p>
             </div>
             <div class="feature-card fade-up delay-2">
-                <div class="feature-tag">Risk Management</div>
+                <div class="feature-tag">Gestao de Risco</div>
                 <h3>Matriz de Risco 5x5</h3>
                 <p>Risk register completo com scoring automatico, niveis de risco, planos de tratamento e vinculacao com controles.</p>
             </div>
             <div class="feature-card fade-up delay-3">
-                <div class="feature-tag">Privacy</div>
+                <div class="feature-tag">Privacidade</div>
                 <h3>ISO 27701 + ROPA</h3>
                 <p>Migracao automatica 27001 para 27701. Modulo ROPA completo para registrar atividades de tratamento de dados.</p>
             </div>
             <div class="feature-card fade-up">
-                <div class="feature-tag">Evidence</div>
+                <div class="feature-tag">Evidencias</div>
                 <h3>Upload R2 + SHA-256</h3>
                 <p>Evidencias armazenadas em Cloudflare R2 com hash criptografico. Audit trail imutavel e Audit Readiness Pack.</p>
             </div>
             <div class="feature-card fade-up delay-1">
-                <div class="feature-tag">Vendor Management</div>
+                <div class="feature-tag">Gestao de Fornecedores</div>
                 <h3>KYV — Know Your Vendor</h3>
                 <p>Gestao de fornecedores com trust score, nivel de diligencia automatico, tracking de DPA e certificacoes.</p>
             </div>
             <div class="feature-card fade-up delay-2">
-                <div class="feature-tag">Security</div>
+                <div class="feature-tag">Seguranca</div>
                 <h3>Segundo fator (TOTP)</h3>
                 <p>Autenticacao em duas etapas por usuario, com codigos de recuperacao e revogacao de sessao ao trocar de papel ou senha.</p>
             </div>
             <div class="feature-card fade-up delay-3">
-                <div class="feature-tag">AI Assistant</div>
+                <div class="feature-tag">Assistente de IA</div>
                 <h3>Compliance Chatbot</h3>
                 <p>Assistente contextual com IA para duvidas sobre controles, audit preparation e melhores praticas de seguranca.</p>
             </div>
@@ -185,7 +185,7 @@
 
     <section class="section" id="pricing">
         <div class="section-title">
-            <h2>Pricing transparente</h2>
+            <h2>Precos transparentes</h2>
             <p>Escolha o plano que se encaixa na sua organizacao</p>
         </div>
         <div class="pricing-grid" id="pricing-grid">
@@ -215,7 +215,7 @@
                 grid.innerHTML = d.tiers.map((t, i) => `
                     <div class="pricing-card fade-up ${i === 1 ? 'featured' : ''}" style="animation-delay:${i * 0.1}s">
                         <div class="pricing-name">${t.name}</div>
-                        <div class="pricing-price">${t.price} <span>/ projeto</span></div>
+                        <div class="pricing-price"><span style="font-size:0.7rem">a partir de</span><br>${t.price}</div>
                         <ul class="pricing-features">
                             ${t.features.map(f => `<li>${f}</li>`).join('')}
                         </ul>
