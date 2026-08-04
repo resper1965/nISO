@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
-import { genId, logAudit, requireResourceAccess, verifyPassword, escapeHtml } from '../helpers';
+import { genId, logAudit, requireResourceAccess, verifyPassword, escapeHtml, autoridadeDeAssinatura, recusaDeAssinatura } from '../helpers';
 import { validateBody, ropaSchema, ropaApprovalSchema } from '../schemas';
 
 export const ropaApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -91,28 +91,20 @@ projectRopaApp.post('/:recordId/approve', async (c) => {
       return c.json({ error: 'Papel de aprovação inválido' }, 400);
     }
 
-    if (user.email === 'resper@bekaa.eu' && role === 'ceo') {
-      return c.json({ error: 'Operação proibida: O Líder SGSI não pode assinar como Direção Executiva (Segregação de Funções).' }, 403);
-    }
-
-    const userGov = await c.env.DB.prepare(
-      'SELECT * FROM project_governance WHERE project_id = ? AND email = ?'
-    ).bind(projectId, user.email).first<any>();
-
-    if (userGov) {
-      if (role === 'ciso' && !userGov.job_title.toLowerCase().includes('sgsi') && !userGov.job_title.toLowerCase().includes('dpo') && user.email !== 'resper@bekaa.eu') {
-        return c.json({ error: 'Apenas o Líder SGSI / DPO designado pode realizar esta assinatura.' }, 403);
-      }
-      if (role === 'ceo' && !userGov.job_title.toLowerCase().includes('ceo') && !userGov.job_title.toLowerCase().includes('diret') && !userGov.job_title.toLowerCase().includes('execut')) {
-        return c.json({ error: 'Apenas a Direção Executiva designada pode realizar esta assinatura.' }, 403);
-      }
-    }
+    // A autoridade sai da matriz de governança DESTE projeto — nunca do papel
+    // de plataforma. Antes, quem não estava na matriz caía num `if (userGov)`
+    // e passava sem checagem nenhuma: assinava os dois papéis do mesmo ROPA.
+    const autoridade = await autoridadeDeAssinatura(c.env.DB, projectId || '', user.email || '');
+    const recusa = recusaDeAssinatura(autoridade, role);
+    if (recusa) return c.json({ error: recusa }, 403);
 
     const dbUser = await c.env.DB.prepare(
       'SELECT * FROM users WHERE email = ?'
     ).bind(user.email).first<any>();
 
-    let approvedBy = dbUser?.name || user.email;
+    // O nome da matriz vem primeiro: é sob aquela designação que a pessoa
+    // assina, e é ele que o auditor confere contra o organograma do projeto.
+    let approvedBy = autoridade.nome || dbUser?.name || user.email;
     const now = new Date().toISOString();
     const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || '127.0.0.1';
     const ua = c.req.header('User-Agent') || 'Unknown';

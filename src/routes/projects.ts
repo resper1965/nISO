@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
-import { genId, genToken, logAudit, requireResourceAccess, verifyPassword, validateUpload } from '../helpers';
+import { genId, genToken, logAudit, requireResourceAccess, verifyPassword, validateUpload, erro500 } from '../helpers';
 import { PHASE_TITLES, PHASE_CHECKLISTS } from '../constants';
 import { MigrationService } from '../services/migration-service';
 import { seedPhases } from '../services/project-setup';
+import { checkCoherence } from '../services/coherence';
 import { validateBody, projectPhaseSchema, interviewSchema, evidenceMetaSchema, scopeChangeSchema, auditorTokenSchema, controlUpdateSchema, maturitySchema, statusSchema, assinaturaSchema } from '../schemas';
 
 export const projectsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -47,7 +48,7 @@ projectsApp.post('/', async (c) => {
 
     return c.json({ id, project_name: body.project_name, client_name: body.client_name, status: 'active' }, 201);
   } catch (e: any) {
-    return c.json({ error: 'Falha ao criar projeto', detail: e.message }, 500);
+    return erro500(c, 'Falha ao criar projeto', e);
   }
 });
 
@@ -67,7 +68,7 @@ projectsApp.get('/', async (c) => {
     const { results } = await c.env.DB.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
     return c.json(results);
   } catch (e: any) {
-    return c.json({ error: 'Falha ao listar projetos', detail: e.message }, 500);
+    return erro500(c, 'Falha ao listar projetos', e);
   }
 });
 
@@ -111,7 +112,7 @@ projectsApp.put('/:id', async (c) => {
     await logAudit(c.env.DB, 'project.updated', user?.email ?? 'system', `Projeto ${id} atualizado: ${updates.join(', ')}`, '', '', id);
     return c.json({ ok: true });
   } catch (e: any) {
-    return c.json({ error: e.message }, 500);
+    return erro500(c, 'Falha ao atualizar projeto', e);
   }
 });
 
@@ -152,7 +153,7 @@ projectsApp.put('/:id/phases/:num', async (c) => {
     await logAudit(c.env.DB, 'phase.updated', c.get('user')?.email ?? 'system', `Fase ${num} do projeto ${projectId} atualizada`, '', '', projectId);
     return c.json({ ok: true });
   } catch (e: any) {
-    return c.json({ error: e.message }, 500);
+    return erro500(c, 'Falha ao atualizar fase do projeto', e);
   }
 });
 
@@ -180,7 +181,7 @@ projectsApp.post('/:id/interviews', async (c) => {
     await logAudit(c.env.DB, 'interviews.saved', c.get('user')?.email ?? 'system', `Salvas ${answers.length} respostas de entrevista para projeto ${projectId}`, '', '', projectId);
     return c.json({ ok: true, count: answers.length });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao salvar entrevistas', detail: e.message }, 500);
+    return erro500(c, 'Falha ao salvar entrevistas', e);
   }
 });
 
@@ -232,7 +233,7 @@ projectsApp.post('/:id/documents/upload', async (c) => {
     await logAudit(c.env.DB, 'document.uploaded', user?.email || 'system', `Documento ${file.name} carregado para projeto ${projectId}`, '', '', projectId);
     return c.json({ ok: true, id: docId, sha256: realSha256 }, 201);
   } catch (e: any) {
-    return c.json({ error: 'Falha no upload de documento', detail: e.message }, 500);
+    return erro500(c, 'Falha no upload de documento', e);
   }
 });
 
@@ -261,7 +262,7 @@ projectsApp.put('/:id/documents/:docId', async (c) => {
     await logAudit(c.env.DB, 'document.updated', user?.email || 'system', `Documento ${docId} atualizado no projeto ${projectId}`, '', '', projectId);
     return c.json({ ok: true });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao atualizar documento', detail: e.message }, 500);
+    return erro500(c, 'Falha ao atualizar documento', e);
   }
 });
 
@@ -274,7 +275,12 @@ projectsApp.get('/:id/assets', async (c) => {
       return c.json({ error: 'Forbidden: Access denied to assets of another project' }, 403);
     }
   }
-  const result = await c.env.DB.prepare('SELECT * FROM assets WHERE project_id = ? ORDER BY created_at DESC').bind(projectId).all();
+  // Ativos removidos (soft delete) ficam de fora da listagem padrão.
+  // COALESCE porque `status` é nullable: `status != 'Removido'` é NULL (falso)
+  // para linhas antigas sem status, e elas sumiriam da listagem.
+  const result = await c.env.DB.prepare(
+    "SELECT * FROM assets WHERE project_id = ? AND COALESCE(status, '') != 'Removido' ORDER BY created_at DESC"
+  ).bind(projectId).all();
   return c.json({ ok: true, assets: result.results });
 });
 
@@ -295,7 +301,76 @@ projectsApp.post('/:id/assets', async (c) => {
     await logAudit(c.env.DB, 'asset.created', user?.email || 'system', `Asset ${id} created for project ${projectId}`, '', '', projectId);
     return c.json({ ok: true, id }, 201);
   } catch (e: any) {
-    return c.json({ error: 'Falha ao criar ativo', detail: e.message }, 500);
+    return erro500(c, 'Falha ao criar ativo', e);
+  }
+});
+
+const ASSET_UPDATABLE_FIELDS = [
+  'name', 'type', 'category', 'classification', 'criticality', 'description',
+  'owner', 'location', 'confidentiality_rating', 'integrity_rating', 'availability_rating',
+] as const;
+
+projectsApp.put('/:id/assets/:assetId', async (c) => {
+  try {
+    const projectId = c.req.param('id');
+    const assetId = c.req.param('assetId');
+    const user = c.get('user');
+    if (user && (user.role === 'org_user' || (user.client_project_id && user.client_project_id !== projectId))) {
+      return c.json({ error: 'Forbidden: Cannot update asset in this project' }, 403);
+    }
+    const body = await c.req.json<any>();
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    for (const field of ASSET_UPDATABLE_FIELDS) {
+      if (body[field] !== undefined) {
+        updates.push(`${field} = ?`);
+        values.push(body[field]);
+      }
+    }
+    if (!updates.length) return c.json({ error: 'Nenhum campo para atualizar' }, 400);
+    updates.push("updated_at = datetime('now')");
+    values.push(assetId, projectId);
+
+    const result = await c.env.DB.prepare(
+      `UPDATE assets SET ${updates.join(', ')} WHERE id = ? AND project_id = ?`
+    ).bind(...values).run();
+    if (!result.meta?.changes) {
+      return c.json({ error: 'Ativo não encontrado neste projeto' }, 404);
+    }
+
+    await logAudit(c.env.DB, 'asset.updated', user?.email || 'system', `Ativo ${assetId} atualizado no projeto ${projectId}`, '', '', projectId);
+    const updated = await c.env.DB.prepare('SELECT * FROM assets WHERE id = ?').bind(assetId).first();
+    return c.json({ ok: true, asset: updated });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao atualizar ativo', e);
+  }
+});
+
+projectsApp.delete('/:id/assets/:assetId', async (c) => {
+  try {
+    const projectId = c.req.param('id');
+    const assetId = c.req.param('assetId');
+    const user = c.get('user');
+    if (user && (user.role === 'org_user' || (user.client_project_id && user.client_project_id !== projectId))) {
+      return c.json({ error: 'Forbidden: Cannot remove asset from this project' }, 403);
+    }
+
+    // Soft delete: plataforma de GRC precisa preservar o histórico do ativo
+    // para trilha de auditoria, então não há DELETE físico aqui. Remover um
+    // ativo já removido também responde 404 (não é idempotente de propósito,
+    // pra deixar claro no cliente que não havia nada a remover).
+    const result = await c.env.DB.prepare(
+      "UPDATE assets SET status = 'Removido', updated_at = datetime('now') WHERE id = ? AND project_id = ? AND status != 'Removido'"
+    ).bind(assetId, projectId).run();
+    if (!result.meta?.changes) {
+      return c.json({ error: 'Ativo não encontrado neste projeto' }, 404);
+    }
+
+    await logAudit(c.env.DB, 'asset.removed', user?.email || 'system', `Ativo ${assetId} removido do projeto ${projectId}`, '', '', projectId);
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao remover ativo', e);
   }
 });
 
@@ -335,7 +410,7 @@ projectsApp.post('/:id/scope-changes', async (c) => {
     await logAudit(c.env.DB, 'scope_change.created', c.get('user')?.email || 'system', `Solicitação de alteração de escopo ${changeId} criada para projeto ${projectId}`, '', '', projectId);
     return c.json({ ok: true, id: changeId });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao registrar alteração de escopo', detail: e.message }, 500);
+    return erro500(c, 'Falha ao registrar alteração de escopo', e);
   }
 });
 
@@ -403,7 +478,7 @@ projectsApp.post('/:id/migrate-27701', async (c) => {
       new_controls_created: created,
     });
   } catch (e: any) {
-    return c.json({ error: 'Falha na migração 27701', detail: e.message }, 500);
+    return erro500(c, 'Falha na migração 27701', e);
   }
 });
 
@@ -446,7 +521,7 @@ projectsApp.post('/:id/migrate-27701-2025', async (c) => {
       new_controls_created: created,
     });
   } catch (e: any) {
-    return c.json({ error: 'Falha na migração 27701:2025', detail: e.message }, 500);
+    return erro500(c, 'Falha na migração 27701:2025', e);
   }
 });
 
@@ -494,6 +569,14 @@ projectsApp.get('/:id/traceability', async (c) => {
   return c.json({ ok: true, controls: linked });
 });
 
+// Coerência entre fases do SGSI/SGPI: referências órfãs entre risks, compliance_controls,
+// evidence e policy_versions (ver src/services/coherence.ts).
+projectsApp.get('/:id/coherence', async (c) => {
+  const projectId = c.req.param('id');
+  const report = await checkCoherence(c.env.DB, projectId);
+  return c.json(report);
+});
+
 // DPIA Assessments inside Project
 projectsApp.get('/:id/dpia', async (c) => {
   const projectId = c.req.param('id');
@@ -515,7 +598,7 @@ projectsApp.post('/:id/dpia', async (c) => {
     await logAudit(c.env.DB, 'dpia_created', user?.email || 'system', `DPIA ${id} created`, '', '', projectId);
     return c.json({ ok: true, id }, 201);
   } catch (e: any) {
-    return c.json({ error: 'Falha ao criar DPIA', detail: e.message }, 500);
+    return erro500(c, 'Falha ao criar DPIA', e);
   }
 });
 
@@ -545,7 +628,7 @@ projectsApp.get('/:id/audit-pack', async (c) => {
       }
     });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao gerar pacote de auditoria', detail: e.message }, 500);
+    return erro500(c, 'Falha ao gerar pacote de auditoria', e);
   }
 });
 
@@ -576,7 +659,7 @@ projectsApp.post('/:id/auditor-token', async (c) => {
     await logAudit(c.env.DB, 'auditor_token.created', c.get('user')?.email ?? 'system', `Auditor token created for project ${projectId}, valid ${days} days`, '', '', projectId);
     return c.json({ ok: true, token, expires_at: expiresAt }, 201);
   } catch (e: any) {
-    return c.json({ error: 'Falha ao gerar token de auditor', detail: e.message }, 500);
+    return erro500(c, 'Falha ao gerar token de auditor', e);
   }
 });
 
@@ -598,23 +681,62 @@ controlsApp.get('/', async (c) => {
 controlsApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
+    // Este router está montado em /api/v1/controls, FORA de
+    // /api/v1/projects/:projectId/*, então o projectAccessMiddleware nunca roda
+    // aqui: sem esta linha o UPDATE abaixo casa por id apenas e um org_admin
+    // reescreve controle de outro tenant.
+    await requireResourceAccess(c.env.DB, 'compliance_controls', id, c.get('user'));
     const v = await validateBody(c, controlUpdateSchema);
     if (!v.success) return v.response;
     const { status, title, description } = v.data as any;
+
+    const atual = await c.env.DB.prepare(
+      'SELECT project_id, description FROM compliance_controls WHERE id = ?'
+    ).bind(id).first() as any;
+    // requireResourceAccess devolve true sem checar existência para papéis de
+    // staff, então o 404 precisa ser explícito.
+    if (!atual) return c.json({ error: 'Controle não encontrado' }, 404);
+
     const updates: string[] = [];
     const values: any[] = [];
     if (status) { updates.push('status = ?'); values.push(status); }
     if (title) { updates.push('title = ?'); values.push(title); }
     if (description !== undefined) { updates.push('description = ?'); values.push(description); }
     if (!updates.length) return c.json({ error: 'Nothing to update' }, 400);
+
+    // `description` é onde mora o texto da política do controle. Um documento
+    // aprovado cujo conteúdo mudou não está mais aprovado — manter o carimbo do
+    // CISO/CEO sobre texto que eles nunca leram é falsear a trilha de auditoria.
+    // O endpoint de edição de política (routes/policies.ts) já zerava; esta rota
+    // não, e era por aqui que dava para contornar a invalidação.
+    //
+    // Compara com o valor gravado de propósito: reenviar o MESMO texto não é
+    // mudança de conteúdo e não deve custar a aprovação de quem já assinou.
+    const textoMudou = description !== undefined && description !== atual.description;
+    if (textoMudou) {
+      updates.push(
+        'ciso_approved_by = NULL', 'ciso_approved_at = NULL',
+        'ciso_approved_ip = NULL', 'ciso_approved_ua = NULL',
+        'ceo_approved_by = NULL', 'ceo_approved_at = NULL',
+        'ceo_approved_ip = NULL', 'ceo_approved_ua = NULL',
+      );
+    }
+
     updates.push("updated_at = datetime('now')");
     values.push(id);
     await c.env.DB.prepare(`UPDATE compliance_controls SET ${updates.join(', ')} WHERE id = ?`).bind(...values).run();
-    const projRow = await c.env.DB.prepare('SELECT project_id FROM compliance_controls WHERE id = ?').bind(id).first() as any;
-    await logAudit(c.env.DB, 'control.updated', c.get('user')?.email ?? 'system', `Controle ${id} atualizado`, '', '', projRow?.project_id);
+
+    const ator = c.get('user')?.email ?? 'system';
+    await logAudit(c.env.DB, 'control.updated', ator, `Controle ${id} atualizado`, '', '', atual.project_id);
+    // Evento próprio: a perda da aprovação é o que o auditor precisa enxergar,
+    // e ela ficaria invisível dentro de um "controle atualizado" genérico.
+    if (textoMudou) {
+      await logAudit(c.env.DB, 'control.approvals_invalidated', ator, `Aprovações do controle ${id} invalidadas: o texto da política mudou`, '', '', atual.project_id);
+    }
     return c.json({ ok: true });
   } catch (e: any) {
-    return c.json({ error: e.message }, 500);
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
+    return erro500(c, 'Falha ao atualizar controle', e);
   }
 });
 
@@ -639,13 +761,16 @@ controlsApp.put('/:id/maturity', async (c) => {
     return c.json({ ok: true });
   } catch (e: any) {
     if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
-    return c.json({ error: 'Falha ao atualizar maturidade', detail: e.message }, 500);
+    return erro500(c, 'Falha ao atualizar maturidade', e);
   }
 });
 
 controlsApp.put('/:id/status', async (c) => {
   try {
     const id = c.req.param('id');
+    // Mesma exposição do PUT /:id — e aqui o estrago é pior, porque marcar
+    // controle alheio como "Implemented" falseia o SGSI do outro tenant.
+    await requireResourceAccess(c.env.DB, 'compliance_controls', id, c.get('user'));
     const v = await validateBody(c, statusSchema);
     if (!v.success) return v.response;
     const { status } = v.data;
@@ -658,7 +783,8 @@ controlsApp.put('/:id/status', async (c) => {
     await logAudit(c.env.DB, 'control.status_updated', c.get('user')?.email || 'system', `Status do controle ${id} atualizado para ${status}`, '', '', projRow?.project_id);
     return c.json({ ok: true });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao atualizar status do controle', detail: e.message }, 500);
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
+    return erro500(c, 'Falha ao atualizar status do controle', e);
   }
 });
 
@@ -667,12 +793,29 @@ const handleControlApprove = async (c: any) => {
     const controlId = c.req.param('id');
     const v = await validateBody(c, assinaturaSchema);
     if (!v.success) return v.response;
-    const { password, project_id } = v.data as any;
+    const { password } = v.data as any;
     const user = c.get('user');
 
     if (!password) {
       return c.json({ error: 'Senha é obrigatória para assinatura eletrônica' }, 400);
     }
+
+    // O escopo do UPDATE saía de `project_id` — um campo do CORPO da requisição.
+    // O `AND project_id = ?` parecia isolamento de tenant mas não era: o valor
+    // era do próprio chamador, então mandar o projeto alheio bastava para
+    // assinar controle de outro tenant com a própria senha. E quando nem havia
+    // `project_id`, o UPDATE caía no ramo sem escopo nenhum.
+    //
+    // Agora o projeto sai do próprio controle e a autorização é uma checagem
+    // explícita, não um WHERE que se parecia com uma. O `project_id` do corpo
+    // continua sendo aceito pelo schema para não quebrar quem já o envia, mas
+    // não decide mais nada.
+    const controlRow = await c.env.DB.prepare(
+      'SELECT project_id FROM compliance_controls WHERE id = ?'
+    ).bind(controlId).first() as any;
+    if (!controlRow) return c.json({ error: 'Controle não encontrado' }, 404);
+    await requireResourceAccess(c.env.DB, 'compliance_controls', controlId, user);
+    const targetProjectId = controlRow.project_id;
 
     const dbUser = (await c.env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(user.email).first()) as any;
 
@@ -680,16 +823,9 @@ const handleControlApprove = async (c: any) => {
       return c.json({ error: 'Senha incorreta' }, 401);
     }
 
-    const targetProjectId = project_id || dbUser?.client_project_id;
-    if (targetProjectId) {
-      await c.env.DB.prepare(
-        `UPDATE compliance_controls SET status = 'Approved', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?`
-      ).bind(controlId, targetProjectId).run();
-    } else {
-      await c.env.DB.prepare(
-        `UPDATE compliance_controls SET status = 'Approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).bind(controlId).run();
-    }
+    await c.env.DB.prepare(
+      `UPDATE compliance_controls SET status = 'Approved', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
+    ).bind(controlId).run();
 
 
 
@@ -701,7 +837,8 @@ const handleControlApprove = async (c: any) => {
     await logAudit(c.env.DB, 'control.approved', user.email, `Controle ${controlId} aprovado com assinatura por ${approvedBy} (IP: ${ip})`, '', '', targetProjectId);
     return c.json({ ok: true, approved_by: approvedBy, approved_at: now });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao assinar controle', detail: e.message }, 500);
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
+    return erro500(c, 'Falha ao assinar controle', e);
   }
 };
 

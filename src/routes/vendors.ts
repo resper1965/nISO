@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
-import { genId, logAudit, requireResourceAccess } from '../helpers';
+import { genId, logAudit, requireResourceAccess, erro500 } from '../helpers';
 import { validateBody, createVendorSchema } from '../schemas';
 
 export const vendorsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -50,16 +50,21 @@ vendorsApp.put('/:id', async (c) => {
     return c.json({ ok: true, id, diligence_level: dl, trust_score: ts });
   } catch (e: any) {
     if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
-    return c.json({ error: 'Falha ao atualizar vendor', detail: e.message }, 500);
+    return erro500(c, 'Falha ao atualizar vendor', e);
   }
 
 });
 
 vendorsApp.delete('/:id', async (c) => {
-  const id = c.req.param('id');
-  await requireResourceAccess(c.env.DB, 'vendors', id, c.get('user'));
-  await c.env.DB.prepare('DELETE FROM vendors WHERE id = ?').bind(id).run();
-  return c.json({ ok: true });
+  try {
+    const id = c.req.param('id');
+    await requireResourceAccess(c.env.DB, 'vendors', id, c.get('user'));
+    await c.env.DB.prepare('DELETE FROM vendors WHERE id = ?').bind(id).run();
+    return c.json({ ok: true });
+  } catch (e: any) {
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
+    return erro500(c, 'Falha ao excluir vendor', e);
+  }
 });
 
 // ─── Project Vendor Operations (/api/v1/projects/:projectId/vendors) ──────
@@ -93,6 +98,6 @@ projectVendorsApp.post('/', async (c) => {
     await logAudit(c.env.DB, 'vendor.created', c.get('user')?.email ?? 'system', `Vendor ${body.name} created for project ${projectId}`);
     return c.json({ ok: true, id, diligence_level: dl, trust_score: ts }, 201);
   } catch (e: any) {
-    return c.json({ error: 'Falha ao criar vendor', detail: e.message }, 500);
+    return erro500(c, 'Falha ao criar vendor', e);
   }
 });

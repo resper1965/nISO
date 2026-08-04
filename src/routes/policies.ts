@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../index';
 import { PHASE_CHECKLISTS, ChecklistItem } from '../checklists';
-import { genId, logAudit, escapeHtml } from '../helpers';
+import { genId, logAudit, escapeHtml, erro500, registraErro } from '../helpers';
 import { PolicyAgent } from '../agents/policy';
 import { MemoryService } from '../services/memory';
 import { PolicyGeneratorService } from '../services/policy-generator';
@@ -65,7 +65,7 @@ policies.post('/api/v1/projects/:id/generate-policy', async (c) => {
     // Save policy markdown directly to compliance_controls.description
     const normId = 'ctrl-' + controlId.toLowerCase().replace(/[^a-z0-9]/g, '');
     await c.env.DB.prepare(
-      'UPDATE compliance_controls SET description = ?, ciso_approved_by = NULL, ciso_approved_at = NULL, ceo_approved_by = NULL, ceo_approved_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE (id = ? OR id = ?) AND project_id = ?'
+      'UPDATE compliance_controls SET description = ?, ciso_approved_by = NULL, ciso_approved_at = NULL, ciso_approved_ip = NULL, ciso_approved_ua = NULL, ceo_approved_by = NULL, ceo_approved_at = NULL, ceo_approved_ip = NULL, ceo_approved_ua = NULL, updated_at = CURRENT_TIMESTAMP WHERE (id = ? OR id = ?) AND project_id = ?'
     ).bind(result.content, normId, controlId, projectId).run();
 
     // Insert new version in policy_versions
@@ -92,7 +92,7 @@ policies.post('/api/v1/projects/:id/generate-policy', async (c) => {
       metadata: result.metadata
     });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao gerar política', detail: e.message }, 500);
+    return erro500(c, 'Falha ao gerar política', e);
   }
 });
 
@@ -177,7 +177,7 @@ REQUISITOS:
 
     return c.json({ ok: true, content });
   } catch (e: any) {
-    return c.json({ error: 'Erro ao gerar documento', detail: e.message }, 500);
+    return erro500(c, 'Erro ao gerar documento', e);
   }
 });
 
@@ -238,7 +238,7 @@ policies.post('/api/v1/projects/:id/approve-document', async (c) => {
 
     return c.json({ ok: true, evidence_id: evidenceId, file_name: fileName });
   } catch (e: any) {
-    return c.json({ error: 'Erro ao aprovar documento', detail: e.message }, 500);
+    return erro500(c, 'Erro ao aprovar documento', e);
   }
 });
 
@@ -317,7 +317,7 @@ policies.post('/api/v1/projects/:id/checklist/:itemId/generate', async (c) => {
       r2_key: r2Key
     });
   } catch (e: any) {
-    return c.json({ error: 'Erro ao gerar documento', detail: e.message }, 500);
+    return erro500(c, 'Erro ao gerar documento', e);
   }
 });
 
@@ -374,7 +374,7 @@ policies.post('/api/v1/projects/:id/generate-policies-bulk', async (c) => {
 
           // Salvar markdown da política e limpar assinaturas de demonstração
           await c.env.DB.prepare(
-            'UPDATE compliance_controls SET description = ?, ciso_approved_by = NULL, ciso_approved_at = NULL, ceo_approved_by = NULL, ceo_approved_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE (id = ? OR id = ?) AND project_id = ?'
+            'UPDATE compliance_controls SET description = ?, ciso_approved_by = NULL, ciso_approved_at = NULL, ciso_approved_ip = NULL, ciso_approved_ua = NULL, ceo_approved_by = NULL, ceo_approved_at = NULL, ceo_approved_ip = NULL, ceo_approved_ua = NULL, updated_at = CURRENT_TIMESTAMP WHERE (id = ? OR id = ?) AND project_id = ?'
           ).bind(result.content, normId, controlId, projectId).run();
 
           // Registrar histórico de versão
@@ -402,13 +402,16 @@ policies.post('/api/v1/projects/:id/generate-policies-bulk', async (c) => {
         policies.push({ control_id: controlId, success: result.success, content_preview: result.content?.substring(0, 200) ?? '' });
       } catch (e: any) {
         failed++;
-        policies.push({ control_id: controlId, success: false, content_preview: e.message });
+        // `content_preview` é prévia de política; devolver a exceção aqui punha a
+        // mensagem crua do D1 dentro de uma resposta 200. O detalhe vai ao log.
+        registraErro(c, e);
+        policies.push({ control_id: controlId, success: false, content_preview: '' });
       }
     }
 
     return c.json({ ok: true, total: controlIds.length, successful, failed, policies });
   } catch (e: any) {
-    return c.json({ error: 'Falha na geração em lote', detail: e.message }, 500);
+    return erro500(c, 'Falha na geração em lote', e);
   }
 });
 
@@ -470,6 +473,62 @@ policies.post('/api/v1/projects/:id/controls/:controlId/restore-version', async 
   return c.json({ ok: true, version: nextVer, policy_markdown: row.policy_text });
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  EDIÇÃO MANUAL DE POLÍTICA — sem IA, texto fornecido diretamente pelo chamador
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// POST /api/v1/projects/:id/controls/:controlId/policy
+policies.post('/api/v1/projects/:id/controls/:controlId/policy', async (c) => {
+  try {
+    const projectId = c.req.param('id');
+    const controlIdRaw = c.req.param('controlId');
+    const body = await c.req.json<{ text?: string }>().catch(() => ({} as any));
+    const { text } = body;
+    if (!text || !text.trim()) return c.json({ error: 'text é obrigatório' }, 400);
+
+    // ponytail: mesmo limite de 2MB usado em approve-document, para evitar exaustão de memória na Edge
+    if (text.length > 2 * 1024 * 1024) {
+      return c.json({ error: 'Texto da política excede o limite de 2MB' }, 400);
+    }
+
+    const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(projectId).first<any>();
+    if (!project) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    const normId = 'ctrl-' + controlIdRaw.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const control = await c.env.DB.prepare(
+      'SELECT * FROM compliance_controls WHERE (id = ? OR id = ?) AND project_id = ?'
+    ).bind(normId, controlIdRaw, projectId).first<any>();
+    if (!control) return c.json({ error: 'Controle não encontrado' }, 404);
+
+    const userEmail = c.get('user')?.email ?? 'system';
+    // control.id é o id canônico que de fato existe em compliance_controls — usar
+    // normId aqui quebraria a FK de policy_versions.control_id quando controlIdRaw
+    // já vier normalizado (ex.: "ctrl-a51"), pois normId dobraria o prefixo.
+    const canonicalId = control.id as string;
+
+    // Atualiza o texto "atual" e zera aprovações — o conteúdo mudou, aprovações anteriores não valem mais
+    await c.env.DB.prepare(
+      'UPDATE compliance_controls SET description = ?, ciso_approved_by = NULL, ciso_approved_at = NULL, ciso_approved_ip = NULL, ciso_approved_ua = NULL, ceo_approved_by = NULL, ceo_approved_at = NULL, ceo_approved_ip = NULL, ceo_approved_ua = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND project_id = ?'
+    ).bind(text, canonicalId, projectId).run();
+
+    // Registra a nova versão no histórico
+    const countRow = await c.env.DB.prepare(
+      'SELECT COUNT(*) as count FROM policy_versions WHERE project_id = ? AND control_id = ?'
+    ).bind(projectId, canonicalId).first<{ count: number }>();
+    const nextVer = (countRow?.count || 0) + 1;
+    const versionId = crypto.randomUUID().replace(/-/g, '').substring(0, 16);
+    await c.env.DB.prepare(
+      'INSERT INTO policy_versions (id, project_id, control_id, version, policy_text, created_by) VALUES (?, ?, ?, ?, ?, ?)'
+    ).bind(versionId, projectId, canonicalId, nextVer, text, userEmail).run();
+
+    await logAudit(c.env.DB, 'policy.manually_edited', userEmail, `Política do controle ${canonicalId} editada manualmente (versão ${nextVer}), projeto ${projectId}`);
+
+    return c.json({ ok: true, control_id: canonicalId, version: nextVer });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao editar política', e);
+  }
+});
+
 // --- TEMPLATES DE POLÍTICAS ---
 policies.get('/api/v1/policies/templates', async (c) => {
   try {
@@ -477,7 +536,7 @@ policies.get('/api/v1/policies/templates', async (c) => {
     const templates = await generator.listAvailableTemplates('v2022');
     return c.json({ ok: true, templates });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao listar templates', detail: e.message }, 500);
+    return erro500(c, 'Falha ao listar templates', e);
   }
 });
 
@@ -494,7 +553,7 @@ policies.get('/api/v1/policies/templates/:templateName', async (c) => {
     });
     return c.json({ ok: true, markdown });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao obter conteúdo do template', detail: e.message }, 500);
+    return erro500(c, 'Falha ao obter conteúdo do template', e);
   }
 });
 
@@ -525,7 +584,7 @@ policies.post('/api/v1/projects/:id/policies/generate-from-template', async (c) 
     // Save policy markdown directly to compliance_controls.description
     const normId = 'ctrl-' + control_id.toLowerCase().replace(/[^a-z0-9]/g, '');
     await c.env.DB.prepare(
-      'UPDATE compliance_controls SET description = ?, ciso_approved_by = NULL, ciso_approved_at = NULL, ceo_approved_by = NULL, ceo_approved_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE (id = ? OR id = ?) AND project_id = ?'
+      'UPDATE compliance_controls SET description = ?, ciso_approved_by = NULL, ciso_approved_at = NULL, ciso_approved_ip = NULL, ciso_approved_ua = NULL, ceo_approved_by = NULL, ceo_approved_at = NULL, ceo_approved_ip = NULL, ceo_approved_ua = NULL, updated_at = CURRENT_TIMESTAMP WHERE (id = ? OR id = ?) AND project_id = ?'
     ).bind(markdown, normId, control_id, projectId).run();
 
     // Insert new version in policy_versions
@@ -550,7 +609,7 @@ policies.post('/api/v1/projects/:id/policies/generate-from-template', async (c) 
       control: control_id
     });
   } catch (e: any) {
-    return c.json({ error: 'Falha ao gerar política a partir de template', detail: e.message }, 500);
+    return erro500(c, 'Falha ao gerar política a partir de template', e);
   }
 });
 

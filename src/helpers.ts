@@ -1,5 +1,54 @@
+import { log, requestId, resumoErro } from './observability';
+
 export function genId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+/**
+ * Resposta 500 sem vazar o interior do banco.
+ *
+ * `e.message` num Worker com D1 é a mensagem crua do SQLite: nome de tabela,
+ * nome de coluna, constraint violada, às vezes um fragmento do SQL. Devolver
+ * isso ao cliente entrega o schema de graça a quem sonda a API — e sonda é
+ * exatamente o que acontece com uma API de conformidade exposta na internet.
+ *
+ * A troca é vazamento por correlação: o detalhe vai para o log estruturado, o
+ * cliente recebe o `request_id` para citar no suporte. É o MESMO id que o
+ * middleware de acesso em `src/index.ts` põe na linha `{"msg":"request",...}`,
+ * então uma reclamação ("deu erro, request_id X") encontra a linha do erro e a
+ * linha de acesso da mesma requisição num `wrangler tail` filtrado por campo.
+ *
+ * A mensagem de negócio ('Falha ao criar assessment') continua indo ao cliente:
+ * ela diz qual operação falhou sem dizer nada sobre como o banco é feito.
+ *
+ * Não use para 403 nem para 400 — autorização e validação respondem sobre o
+ * pedido do cliente, não sobre o estado interno, e a mensagem delas é útil.
+ */
+export function erro500(c: any, mensagem: string, e: unknown) {
+  return c.json({ error: mensagem, request_id: registraErro(c, e) }, 500);
+}
+
+/**
+ * Registra a exceção no log estruturado e devolve o `request_id` da requisição.
+ *
+ * Existe separado do `erro500` para as poucas rotas que respondem HTML em vez
+ * de JSON (relatório DPIA, relatório ROPA) e para falha por item dentro de uma
+ * resposta 200 — elas precisam do mesmo par log/id sem o envelope JSON.
+ */
+export function registraErro(c: any, e: unknown): string {
+  const rid = c.get?.('requestId') || requestId(c);
+  log('error', {
+    msg: 'erro_handler',
+    request_id: rid,
+    metodo: c.req?.method,
+    rota: c.req?.url ? new URL(c.req.url).pathname : undefined,
+    ator: c.get?.('user')?.email,
+    // resumoErro traz mensagem + primeira linha do stack: o suficiente para
+    // localizar a falha sem despejar stack inteiro (ruído e, às vezes, valor
+    // de variável — este produto trata PII sob LGPD).
+    erro: resumoErro(e),
+  });
+  return rid;
 }
 
 export async function logAudit(
@@ -40,7 +89,7 @@ const ALLOWED_TABLES = [
   'risks', 'vendors', 'training_records', 'ropa_records', 'corrective_actions',
   'compliance_controls', 'evidence', 'assets', 'stakeholders', 'dpia_assessments',
   'audit_schedule', 'certification_tracking', 'audit_findings', 'management_reviews',
-  'performance_metrics', 'webhooks', 'api_keys'
+  'performance_metrics', 'webhooks', 'api_keys', 'auditor_notes'
 ];
 
 export async function requireResourceAccess(db: D1Database, table: string, resourceId: string, user: any) {
@@ -65,6 +114,105 @@ export function requireProjectAccess(user: any, projectId: string): true {
   if (user.role === 'consultor' || user.role === 'platform_admin' || user.role === 'consultant') return true;
   if (user.client_project_id === projectId) return true;
   throw new Error('Forbidden: No access to this project');
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  AUTORIDADE DE ASSINATURA — sai de project_governance, e só de lá
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * `users.role` diz o que a pessoa OPERA na plataforma; `project_governance` diz
+ * quem ela É naquele projeto. Só o segundo pode decidir o que ela ASSINA — a
+ * mesma pessoa é DPO num cliente, consultor noutro e nada num terceiro, e é
+ * exatamente por isso que a matriz de governança existe.
+ *
+ * Antes, cada caminho de assinatura respondia isso do seu jeito, e os dois
+ * erravam em direções opostas:
+ *
+ *   - `evidence.ts` isentava `platform_admin`/`ciso`/`ceo` da matriz inteira,
+ *     então um papel de plataforma assinava como Líder SGSI em QUALQUER projeto;
+ *   - `ropa.ts` não olhava papel nenhum, mas só checava cargo `if (userGov)` —
+ *     quem não estava na matriz passava sem checagem alguma, e assinava os DOIS
+ *     papéis do mesmo registro.
+ *
+ * Nos dois casos o resultado é o mesmo para a auditoria: `ciso_approved_by` e
+ * `ceo_approved_by` com o mesmo nome. Aprovação dupla assinada pela mesma
+ * pessoa é aprovação simples com dois carimbos.
+ */
+export type PapelAssinatura = 'ciso' | 'ceo';
+
+export interface AutoridadeAssinatura {
+  /** A pessoa está designada na matriz DESTE projeto. */
+  designado: boolean;
+  ehLiderSgsi: boolean;
+  ehDirecao: boolean;
+  /** Nome como consta na matriz, para o carimbo da assinatura. */
+  nome: string | null;
+}
+
+export async function autoridadeDeAssinatura(
+  db: D1Database,
+  projectId: string,
+  email: string
+): Promise<AutoridadeAssinatura> {
+  const gov = await db
+    .prepare('SELECT name, job_title FROM project_governance WHERE project_id = ? AND email = ?')
+    .bind(projectId, email)
+    .first<any>();
+
+  const cargo = (gov?.job_title || '').toLowerCase();
+  return {
+    designado: !!gov,
+    ehLiderSgsi: cargo.includes('sgsi') || cargo.includes('dpo') || cargo.includes('ciso'),
+    ehDirecao: cargo.includes('ceo') || cargo.includes('diret') || cargo.includes('execut'),
+    nome: gov?.name ?? null,
+  };
+}
+
+/**
+ * Motivo da recusa, ou `null` se a assinatura é legítima. Falha fechado: sem
+ * designação na matriz não há assinatura, para ninguém.
+ */
+export function recusaDeAssinatura(a: AutoridadeAssinatura, papel: PapelAssinatura): string | null {
+  if (!a.designado) {
+    return 'Operação proibida: usuário não designado na matriz de Governança deste projeto.';
+  }
+  // Segregação antes da checagem de cargo: quem acumula os dois títulos ainda
+  // assim não assina os dois papéis.
+  if (papel === 'ceo' && a.ehLiderSgsi) {
+    return 'Operação proibida: o Líder SGSI não pode assinar como Direção Executiva (Segregação de Funções).';
+  }
+  if (papel === 'ciso' && !a.ehLiderSgsi) {
+    return 'Apenas o Líder SGSI / DPO designado pode realizar esta assinatura. Verifique o cargo registrado na matriz de Governança do projeto.';
+  }
+  if (papel === 'ceo' && !a.ehDirecao) {
+    return 'Apenas a Direção Executiva designada pode realizar esta assinatura. Verifique o cargo registrado na matriz de Governança do projeto.';
+  }
+  return null;
+}
+
+/** Papéis internos da ness. — os únicos que enxergam o funil comercial. */
+const PAPEIS_NESS = new Set(['consultor', 'consultant', 'platform_admin']);
+
+/**
+ * Guarda de papel para o pipeline comercial da ness. (lead → assessment →
+ * proposta). Estes registros não pertencem a projeto nenhum: não existe
+ * `project_id` para comparar, então `requireResourceAccess` não alcança essas
+ * rotas e o isolamento tem de ser por PAPEL.
+ *
+ * Sem esta guarda, o `org_admin` de um cliente — que o RBAC global deixa
+ * escrever, porque a lista read-only só cobre `org_user` e `client` — lia a
+ * carteira comercial inteira (contato, CNPJ, preço, HTML da proposta) de TODOS
+ * os outros clientes e ainda aprovava ou excluía proposta alheia. Confirmado
+ * por sonda: `GET /api/v1/proposals/:id` devolvia 200 com o `content_html` de
+ * outro cliente e `DELETE` removia a linha.
+ */
+export async function somenteNess(c: any, next: () => Promise<void>) {
+  const user = c.get('user');
+  if (!user || !PAPEIS_NESS.has(user.role)) {
+    return c.json({ error: 'Forbidden: Área comercial restrita à equipe ness.' }, 403);
+  }
+  await next();
 }
 
 /** Escape HTML entities para prevenir XSS em templates HTML */

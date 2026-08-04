@@ -133,6 +133,66 @@ describe('nISO API (D1 e KV reais)', () => {
       expect((await req(`/api/v1/projects/${OUTRO}`, { headers: client })).status).toBe(403);
     });
 
+    // /api/v1/controls está montado FORA de /api/v1/projects/:projectId/*, então o
+    // projectAccessMiddleware não passa por aqui. Sem checagem explícita em cada
+    // rota, o UPDATE casa só por id e atravessa o tenant.
+    describe('controles de outro tenant não são alcançáveis por id', () => {
+      it('PUT /controls/:id não reescreve controle alheio', async () => {
+        const r = await req('/api/v1/controls/ctrl-alheio', {
+          method: 'PUT',
+          headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'INVADIDO' }),
+        });
+        expect(r.status).toBe(403);
+        const l = await env.DB.prepare('SELECT title FROM compliance_controls WHERE id = ?').bind('ctrl-alheio').first<any>();
+        expect(l.title).toBe('Controle alheio');
+      });
+
+      it('PUT /controls/:id/status não falseia o SGSI alheio', async () => {
+        const r = await req('/api/v1/controls/ctrl-alheio/status', {
+          method: 'PUT',
+          headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'Implemented' }),
+        });
+        expect(r.status).toBe(403);
+        const l = await env.DB.prepare('SELECT status FROM compliance_controls WHERE id = ?').bind('ctrl-alheio').first<any>();
+        expect(l.status).toBe('Missing');
+      });
+
+      it('PUT /controls/:id/approve não assina controle alheio, nem com project_id no corpo', async () => {
+        // O `project_id` do corpo era o que definia o escopo do UPDATE — mandar o
+        // projeto alheio bastava para assinar o controle do outro tenant.
+        const r = await req('/api/v1/controls/ctrl-alheio/approve', {
+          method: 'PUT',
+          headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: 'password123', project_id: OUTRO }),
+        });
+        expect(r.status).toBe(403);
+        const l = await env.DB.prepare('SELECT status FROM compliance_controls WHERE id = ?').bind('ctrl-alheio').first<any>();
+        expect(l.status).toBe('Missing');
+      });
+
+      it('mas o controle do próprio projeto continua editável e assinável', async () => {
+        const edicao = await req('/api/v1/controls/ctrl-proprio', {
+          method: 'PUT',
+          headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title: 'Título novo' }),
+        });
+        expect(edicao.status, await edicao.clone().text()).toBe(200);
+
+        const assinatura = await req('/api/v1/controls/ctrl-proprio/approve', {
+          method: 'PUT',
+          headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: 'password123' }),
+        });
+        expect(assinatura.status, await assinatura.clone().text()).toBe(200);
+
+        const l = await env.DB.prepare('SELECT title, status FROM compliance_controls WHERE id = ?').bind('ctrl-proprio').first<any>();
+        expect(l.title).toBe('Título novo');
+        expect(l.status).toBe('Approved');
+      });
+    });
+
     it('platform_admin altera e remove usuário, e a linha some do banco', async () => {
       const put = await req('/api/v1/users/usr-alvo', {
         method: 'PUT',
@@ -225,6 +285,117 @@ describe('nISO API (D1 e KV reais)', () => {
       expect((await req(`/api/v1/projects/${OUTRO}/assets`, { headers: orgAdmin })).status).toBe(403);
     });
 
+    it('assets: PUT atualiza campos parciais e recusa asset de outro projeto ou inexistente', async () => {
+      const criar = await req(`/api/v1/projects/${PROJ}/assets`, {
+        method: 'POST',
+        headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Servidor de Arquivos', type: 'Hardware', category: 'Hardware', criticality: 'Medium', owner: 'TI' }),
+      });
+      const { id: assetId } = await criar.json() as any;
+
+      const atualizar = await req(`/api/v1/projects/${PROJ}/assets/${assetId}`, {
+        method: 'PUT',
+        headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ criticality: 'Critical', owner: 'Infraestrutura' }),
+      });
+      expect(atualizar.status, await atualizar.clone().text()).toBe(200);
+      const atualizado = await env.DB.prepare('SELECT criticality, owner, name FROM assets WHERE id = ?').bind(assetId).first<any>();
+      expect(atualizado.criticality).toBe('Critical');
+      expect(atualizado.owner).toBe('Infraestrutura');
+      // Campo não enviado permanece intacto — atualização é parcial.
+      expect(atualizado.name).toBe('Servidor de Arquivos');
+
+      // Ativo de outro projeto: mesmo asset id, mas na URL do projeto errado.
+      const assetAlheioId = 'asset-alheio';
+      await env.DB.prepare(
+        `INSERT INTO assets (id, project_id, name, type, category, owner, criticality) VALUES (?,?,?,?,?,?,?)`
+      ).bind(assetAlheioId, OUTRO, 'Ativo Alheio', 'Hardware', 'Hardware', 'Terceiros', 'Low').run();
+      const cruzado = await req(`/api/v1/projects/${PROJ}/assets/${assetAlheioId}`, {
+        method: 'PUT',
+        headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ criticality: 'Critical' }),
+      });
+      expect(cruzado.status).toBe(404);
+      const intacto = await env.DB.prepare('SELECT criticality FROM assets WHERE id = ?').bind(assetAlheioId).first<any>();
+      expect(intacto.criticality).toBe('Low');
+
+      const inexistente = await req(`/api/v1/projects/${PROJ}/assets/nao-existe`, {
+        method: 'PUT',
+        headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ criticality: 'Critical' }),
+      });
+      expect(inexistente.status).toBe(404);
+    });
+
+    it('assets: DELETE é soft delete (status Removido) e some da listagem', async () => {
+      const criar = await req(`/api/v1/projects/${PROJ}/assets`, {
+        method: 'POST',
+        headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'Notebook Corporativo', type: 'Hardware', category: 'Hardware' }),
+      });
+      const { id: assetId } = await criar.json() as any;
+
+      const remover = await req(`/api/v1/projects/${PROJ}/assets/${assetId}`, { method: 'DELETE', headers: orgAdmin });
+      expect(remover.status, await remover.clone().text()).toBe(200);
+
+      const linha = await env.DB.prepare('SELECT status FROM assets WHERE id = ?').bind(assetId).first<any>();
+      expect(linha.status).toBe('Removido');
+
+      const listar = await req(`/api/v1/projects/${PROJ}/assets`, { headers: orgAdmin });
+      const lista = await listar.json() as any;
+      const itens = Array.isArray(lista) ? lista : lista.assets || lista.results;
+      expect(itens.some((a: any) => a.id === assetId)).toBe(false);
+
+      // Ativo de outro projeto não pode ser removido pela URL do projeto do atacante.
+      const assetOutroId = 'asset-outro-delete';
+      await env.DB.prepare(
+        `INSERT INTO assets (id, project_id, name, type, category) VALUES (?,?,?,?,?)`
+      ).bind(assetOutroId, OUTRO, 'Ativo do Outro Tenant', 'Hardware', 'Hardware').run();
+      const cruzado = await req(`/api/v1/projects/${PROJ}/assets/${assetOutroId}`, { method: 'DELETE', headers: orgAdmin });
+      expect(cruzado.status).toBe(404);
+      const aindaAtivo = await env.DB.prepare('SELECT status FROM assets WHERE id = ?').bind(assetOutroId).first<any>();
+      expect(aindaAtivo.status).toBe('Active');
+    });
+
+    it('certificação: DELETE remove de verdade, loga auditoria, e 404 se já não existir ou for de outro projeto', async () => {
+      const criar = await req(`/api/v1/projects/${PROJ}/certification`, {
+        method: 'POST',
+        headers: { ...orgAdmin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ standard: 'ISO 27001:2022', stage: 'Gap Assessment' }),
+      });
+      expect(criar.status, await criar.clone().text()).toBe(201);
+      const { certification } = await criar.json() as any;
+      const certId = certification.id as string;
+
+      const remover = await req(`/api/v1/certification/${certId}`, { method: 'DELETE', headers: orgAdmin });
+      expect(remover.status, await remover.clone().text()).toBe(200);
+
+      const sumiu = await env.DB.prepare('SELECT id FROM certification_tracking WHERE id = ?').bind(certId).first();
+      expect(sumiu).toBeNull();
+
+      const log = await env.DB.prepare(
+        "SELECT * FROM audit_logs WHERE action = 'certification.deleted' AND project_id = ? ORDER BY created_at DESC LIMIT 1"
+      ).bind(PROJ).first<any>();
+      expect(log).not.toBeNull();
+
+      // Repetir a remoção não encontra mais o registro. Usa papel de staff
+      // (platform_admin) porque requireResourceAccess só chega ao 404 do
+      // handler quando não é um org_admin/client barrado antes por não achar
+      // project_id nenhum para comparar — mesmo comportamento do PUT.
+      const denovo = await req(`/api/v1/certification/${certId}`, { method: 'DELETE', headers: admin });
+      expect(denovo.status).toBe(404);
+
+      // Registro de outro projeto: org_admin do PROJ não pode remover (IDOR).
+      const certOutroId = 'cert-outro-tenant';
+      await env.DB.prepare(
+        `INSERT INTO certification_tracking (id, project_id, standard, stage) VALUES (?,?,?,?)`
+      ).bind(certOutroId, OUTRO, 'ISO 27701:2019', 'Gap Assessment').run();
+      const cruzado = await req(`/api/v1/certification/${certOutroId}`, { method: 'DELETE', headers: orgAdmin });
+      expect(cruzado.status).toBe(403);
+      const aindaExiste = await env.DB.prepare('SELECT id FROM certification_tracking WHERE id = ?').bind(certOutroId).first();
+      expect(aindaExiste).not.toBeNull();
+    });
+
     it('client acessa riscos do próprio projeto e é bloqueado no alheio', async () => {
       expect((await req(`/api/v1/projects/${PROJ}/risks`, { headers: client })).status).toBe(200);
       expect((await req(`/api/v1/projects/${OUTRO}/risks`, { headers: client })).status).toBe(403);
@@ -276,6 +447,77 @@ describe('nISO API (D1 e KV reais)', () => {
         method: 'POST', headers: { 'X-API-Key': CHAVE_ESCRITA }, body: fd,
       });
       expect(comPermissao.status, await comPermissao.clone().text()).toBe(201);
+    });
+
+    it('trilha de auditoria identifica a pessoa por trás da chave, não só o id', async () => {
+      const fd = new FormData();
+      fd.append('file', new File(['x'], 'auditoria.txt', { type: 'text/plain' }));
+      const envio = await req(`/api/v1/projects/${PROJ}/evidence/upload`, {
+        method: 'POST', headers: { 'X-API-Key': CHAVE_ESCRITA }, body: fd,
+      });
+      expect(envio.status, await envio.clone().text()).toBe(201);
+
+      const log = await env.DB.prepare(
+        "SELECT actor FROM audit_logs WHERE action = 'evidence.uploaded' ORDER BY created_at DESC"
+      ).first<any>();
+      // O nome da chave ('escrita', da fixture) é o que o auditor lê; o id fica
+      // junto porque é ele que identifica a chave sem ambiguidade.
+      expect(log.actor).toBe('apikey:key-rw (escrita)');
+
+      // Mesma identidade na evidência, senão o `uploaded_by` contradiz o log.
+      const ev = await env.DB.prepare(
+        'SELECT uploaded_by FROM evidence WHERE file_name = ?'
+      ).bind('auditoria.txt').first<any>();
+      expect(ev.uploaded_by).toBe('apikey:key-rw (escrita)');
+    });
+
+    it('nome da chave não falsifica ator no log: prefixo vem antes, e quebra de linha some', async () => {
+      await env.DB.prepare(
+        `INSERT INTO api_keys (id, project_id, key_hash, name, permissions, status) VALUES (?,?,?,?,?,?)`
+      ).bind('key-spoof', PROJ, await sha256Hex('chave-spoof'), 'admin@ness.io\nactor: admin@ness.io', 'write', 'Active').run();
+
+      const fd = new FormData();
+      fd.append('file', new File(['x'], 'spoof.txt', { type: 'text/plain' }));
+      await req(`/api/v1/projects/${PROJ}/evidence/upload`, {
+        method: 'POST', headers: { 'X-API-Key': 'chave-spoof' }, body: fd,
+      });
+
+      const log = await env.DB.prepare(
+        "SELECT actor FROM audit_logs WHERE action = 'evidence.uploaded' ORDER BY created_at DESC"
+      ).first<any>();
+      expect(log.actor).toBe('apikey:key-spoof (admin@ness.io actor: admin@ness.io)');
+      expect(log.actor.startsWith('apikey:')).toBe(true);
+      expect(log.actor).not.toContain('\n');
+    });
+
+    it('chave sem projeto não autentica — senão enxergaria o portfólio inteiro', async () => {
+      // Se uma chave assim passasse pela autenticação, viraria um `client` sem
+      // `client_project_id`, e o filtro do portfólio (que só restringe quando
+      // esse campo é truthy) devolveria os projetos de todos os tenants.
+      //
+      // A linha órfã deixou de ser inserível: `api_keys.project_id` virou NOT NULL
+      // (migration 0021). O que continua precisando de cobertura é a guarda de
+      // RUNTIME — ela é a última linha enquanto houver banco sem a migration
+      // aplicada. Daí o D1 legado abaixo, que devolve a chave sem projeto.
+      const dbLegado = {
+        prepare: () => ({
+          bind: () => ({
+            first: async () => ({
+              id: 'key-sem-proj', project_id: null, name: 'orfa',
+              permissions: 'read', status: 'Active', expires_at: null,
+            }),
+            run: async () => ({ success: true }),
+            all: async () => ({ results: [] }),
+          }),
+        }),
+      };
+
+      const r = await req(
+        '/api/v1/portfolio',
+        { headers: { 'X-API-Key': 'chave-sem-projeto' } },
+        testEnv({ DB: dbLegado })
+      );
+      expect(r.status).toBe(401);
     });
 
     it('chave revogada não autentica', async () => {
