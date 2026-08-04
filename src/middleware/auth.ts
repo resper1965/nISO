@@ -181,7 +181,20 @@ export const authMiddleware = createMiddleware<{ Bindings: Bindings; Variables: 
   // o allow-list abaixo existe para papéis HUMANOS read-only. Sem esta exceção, uma
   // integração legítima (o mcp-server-niso) tomava 403 mesmo com chave 'write'.
   // O isolamento de tenant continua valendo — projectAccessMiddleware roda depois.
-  if (!apiKeyWriteCapable && (user.role === 'org_user' || user.role === 'client') && (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE')) {
+  // Lista de PERMISSÃO, não de negação. A condição aqui era
+  // `role === 'org_user' || role === 'client'`, e um papel que ninguém
+  // reconhece — `ciso`, um dedo trocado em `org_user`, qualquer palavra que
+  // `users.role` aceitasse quando era TEXT livre — simplesmente não casava e
+  // atravessava a guarda inteira. O papel menos reconhecido era o mais
+  // poderoso, calado.
+  //
+  // Invertido, o desconhecido cai no allow-list restrito e falha fechado. Os
+  // três nomes abaixo são os que ESCREVEM: `platform_admin` opera a plataforma,
+  // `consultor` entrega serviço, `org_admin` administra o próprio cliente. As
+  // grafias legadas (`admin`, `user`, `consultant`, `client_admin`) já foram
+  // traduzidas acima, antes de chegar aqui.
+  const PAPEIS_COM_ESCRITA_AMPLA = new Set(['platform_admin', 'consultor', 'org_admin']);
+  if (!apiKeyWriteCapable && !PAPEIS_COM_ESCRITA_AMPLA.has(user.role as string) && (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE')) {
     // Allow-list preciso (método + rota) das escritas permitidas a papéis
     // read-only. Matching por sufixo/regex — nunca substring — para que
     // DELETE de evidência e ações de aprovação/assinatura/avaliação fiquem

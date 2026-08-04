@@ -180,12 +180,17 @@ evidenceApp.post('/:id/evaluate', async (c) => {
 async function handleApprove(c: any) {
   try {
     const id = c.req.param('id');
-    // Isolamento de tenant ANTES de qualquer coisa. A checagem da matriz de
-    // governança logo abaixo parece cobrir isto, mas não cobre: ela é pulada
-    // inteira para `platform_admin`, `ciso` e `ceo`, e `users.role` é TEXT
-    // livre (`createUserSchema.role` é `z.string()`). Um usuário com papel
-    // `ciso` escopado ao projeto A assinava evidência do projeto B — sonda
-    // devolveu 200 e gravou `ciso_approved_by` na linha do outro cliente.
+    // Isolamento de tenant ANTES de qualquer coisa, e não como efeito colateral
+    // da checagem de governança logo abaixo. Já foram duas as razões de aquela
+    // checagem não servir de guarda de tenant: ela era pulada inteira para
+    // `platform_admin`/`ciso`/`ceo` (hoje não é mais — ver `autoridadeDeAssinatura`),
+    // e `users.role` aceitava qualquer palavra (hoje é enum fechado, ver
+    // `PAPEIS_DE_USUARIO`). Um usuário com papel `ciso` escopado ao projeto A
+    // assinava evidência do projeto B — a sonda devolveu 200 e gravou
+    // `ciso_approved_by` na linha do outro cliente.
+    //
+    // As duas causas foram fechadas; esta linha continua aqui porque é ela que
+    // torna o isolamento independente de ambas.
     await requireResourceAccess(c.env.DB, 'evidence', id, c.get('user'));
     const evidence = (await c.env.DB.prepare('SELECT * FROM evidence WHERE id = ?').bind(id).first()) as any;
     if (!evidence) return c.json({ error: 'Evidência não encontrada' }, 404);

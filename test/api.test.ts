@@ -252,6 +252,55 @@ describe('nISO API (D1 e KV reais)', () => {
       expect(criado).toBeNull();
     });
 
+    it('papel fora da lista é recusado na criação, e nada é gravado', async () => {
+      const res = await req('/api/v1/users', {
+        method: 'POST',
+        headers: { ...admin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'ciso@example.com', password: 'password123', name: 'CISO', role: 'ciso' }),
+      });
+      expect(res.status).toBe(400);
+      expect(await res.text()).toContain('Papel inválido');
+
+      const criado = await env.DB.prepare("SELECT id FROM users WHERE email='ciso@example.com'").first<any>();
+      expect(criado).toBeNull();
+    });
+
+    it('papel fora da lista é recusado na EDIÇÃO — o caminho por onde se promove alguém', async () => {
+      // O `PUT` lia `req.json()` cru: validar só a criação deixaria de pé o
+      // caminho que interessa a quem quer subir de papel um usuário existente.
+      await env.DB.prepare(
+        `INSERT INTO users (id, email, password_hash, name, role, client_project_id) VALUES ('usr-promo','promo@example.com','x','Promo','org_user',?)`
+      ).bind(PROJ).run();
+
+      const res = await req('/api/v1/users/usr-promo', {
+        method: 'PUT',
+        headers: { ...admin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'ciso' }),
+      });
+      expect(res.status).toBe(400);
+
+      const depois = await env.DB.prepare("SELECT role FROM users WHERE id='usr-promo'").first<any>();
+      expect(depois.role).toBe('org_user');
+    });
+
+    it('papel desconhecido já no banco não escreve — a guarda é lista de permissão', async () => {
+      // Linha legada, gravada quando `users.role` aceitava qualquer palavra.
+      // Enum na entrada impede novas; esta é a segunda camada, para as antigas.
+      // Antes, `ciso` não casava com `role === 'org_user' || role === 'client'`
+      // e escrevia à vontade dentro do projeto — mais poder que o `org_user`
+      // que ele deveria ser.
+      const desconhecido = await sessionFor({
+        id: 'usr-legado', email: 'legado@example.com', role: 'ciso', client_project_id: PROJ,
+      });
+      const res = await req(`/api/v1/projects/${PROJ}/risks`, {
+        method: 'POST',
+        headers: { ...desconhecido, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ asset: 'A', threat: 'T', impact: 3, probability: 3 }),
+      });
+      expect(res.status).toBe(403);
+      expect(await res.text()).toContain('Read-only role');
+    });
+
     it('org_user é bloqueado em escrita geral mas pode marcar checklist', async () => {
       const bloqueado = await req(`/api/v1/projects/${PROJ}/risks`, {
         method: 'POST',

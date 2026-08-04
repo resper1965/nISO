@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
 import { genId, hashPassword, logAudit, sendEmail, escapeHtml, invalidateUserSessions, erro500 } from '../helpers';
-import { validateBody, createUserSchema } from '../schemas';
+import { validateBody, createUserSchema, updateUserSchema } from '../schemas';
 
 export const usersApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -12,7 +12,7 @@ usersApp.get('/', async (c) => {
   if (user.role !== 'consultor' && user.role !== 'platform_admin' && user.role !== 'org_admin') {
     return c.json({ error: 'Unauthorized' }, 403);
   }
-  
+
   try {
     let stmt = c.env.DB.prepare('SELECT id, email, name, role, client_project_id, created_at FROM users ORDER BY created_at DESC');
     if (user.role === 'org_admin') {
@@ -53,7 +53,7 @@ usersApp.post('/', async (c) => {
 
     const id = genId();
     const hash = await hashPassword(password);
-    
+
     await c.env.DB.prepare(
       `INSERT INTO users (id, email, password_hash, name, role, client_project_id, requires_password_change) VALUES (?, ?, ?, ?, ?, ?, 1)`
     ).bind(id, email, hash, name, targetRole, targetProject || null).run();
@@ -93,8 +93,15 @@ usersApp.put('/:id', async (c) => {
 
   const id = c.req.param('id');
   try {
-    const { name, email, role, client_project_id, password } = await c.req.json();
-    
+    // `updateUserSchema` existia desde sempre e NÃO era usado: este handler lia
+    // `req.json()` cru. Ou seja, o caminho de edição aceitava qualquer papel
+    // mesmo depois de o de criação passar a validar — e é o caminho que importa,
+    // porque é por ele que se PROMOVE alguém já existente.
+    const valid = await validateBody(c, updateUserSchema);
+    if (!valid.success) return valid.response;
+    const { name, email, role, client_project_id, password } = valid.data;
+
+
     const user = await c.env.DB.prepare('SELECT id, role, client_project_id FROM users WHERE id = ?').bind(id).first() as any;
     if (!user) {
       return c.json({ error: 'Usuário não encontrado' }, 404);
