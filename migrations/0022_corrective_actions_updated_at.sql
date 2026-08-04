@@ -1,0 +1,50 @@
+-- Migration 0022: `updated_at` em `corrective_actions`.
+--
+-- ⚠️ Faça backup antes: `npm run db:backup` (ver backups/README.md).
+--
+-- ── Por quê ─────────────────────────────────────────────────────────────────
+-- `src/routes/governance.ts` grava a coluna ao abrir uma ação corretiva a partir
+-- de uma não-conformidade de auditoria:
+--
+--     INSERT INTO corrective_actions (..., created_at, updated_at)
+--
+-- A coluna nunca existiu. O INSERT falha com "no such column: updated_at", e
+-- como ele vem ANTES do INSERT em `audit_findings`, o achado também não é
+-- gravado: registrar uma NC menor ou maior numa auditoria interna não gravava
+-- nada e devolvia erro. É o registro exigido por 9.2/10.1 — a trilha que prova
+-- que a não-conformidade foi vista e tratada.
+--
+-- ── Por que ADICIONAR a coluna, e não tirar a escrita ───────────────────────
+-- `updated_at` é convenção do schema, não invenção deste handler: 12 tabelas a
+-- têm (evidence, risks, ropa_records, compliance_controls, assets, leads...) e
+-- os handlers a mantêm em cada UPDATE. `corrective_actions` é a única que ficou
+-- para trás. Numa ação corretiva a data da última alteração não é adorno: é
+-- como um auditor distingue tratativa em andamento de registro parado.
+--
+-- Este PR também passa a mantê-la no `PUT /api/v1/capa/:id` (`src/routes/capa.ts`).
+-- Sem isso a coluna nasceria mentindo — preenchida na criação e congelada.
+--
+-- ── Efeito colateral no deploy ──────────────────────────────────────────────
+-- `deploy.yml` RECUSA deploy enquanto houver migration pendente. Depois que este
+-- arquivo entrar na main, nenhum deploy passa até que ela seja aplicada:
+--
+--     npm run db:backup
+--     npx wrangler d1 migrations apply niso-db --remote
+--
+-- ── Verificação depois de aplicar ───────────────────────────────────────────
+--     npx wrangler d1 execute niso-db --remote --command "PRAGMA table_info(corrective_actions);"
+--   -> deve listar `updated_at`.
+--
+--     npx wrangler d1 execute niso-db --remote --command "SELECT count(*) AS sem_data FROM corrective_actions WHERE updated_at IS NULL;"
+--   -> deve ser 0 (o backfill abaixo cobre as linhas existentes).
+--
+-- ── Nota sobre o DEFAULT ────────────────────────────────────────────────────
+-- SQLite não aceita `DEFAULT CURRENT_TIMESTAMP` num `ADD COLUMN` (o default de
+-- coluna adicionada precisa ser constante). Por isso a coluna entra sem default
+-- e as linhas existentes recebem o `created_at` no UPDATE seguinte: é o valor
+-- honesto para uma linha que nunca foi alterada. O `schema.sql` — usado para
+-- criar banco do zero — mantém o `DEFAULT CURRENT_TIMESTAMP`, que ali é válido.
+
+ALTER TABLE corrective_actions ADD COLUMN updated_at DATETIME;
+
+UPDATE corrective_actions SET updated_at = created_at WHERE updated_at IS NULL;

@@ -16,7 +16,10 @@ capaApp.put('/:id', async (c) => {
     const body = await c.req.json<any>();
     const completedAt = body.status === 'Closed' ? new Date().toISOString() : null;
     await c.env.DB.prepare(
-      `UPDATE corrective_actions SET audit_id=?, risk_id=?, control_id=?, title=?, description=?, severity=?, assigned_to=?, due_date=?, status=?, resolution=?, completed_at=? WHERE id=?`
+      // `updated_at` acompanha a edição: sem isso a coluna só teria o valor da
+      // criação, e uma ação corretiva parada há meses seria indistinguível de
+      // uma tratada ontem — que é justamente o que 10.1 pede para acompanhar.
+      `UPDATE corrective_actions SET audit_id=?, risk_id=?, control_id=?, title=?, description=?, severity=?, assigned_to=?, due_date=?, status=?, resolution=?, completed_at=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`
     ).bind(body.audit_id || null, body.risk_id || null, body.control_id || null, body.title, body.description, body.severity, body.assigned_to, body.due_date, body.status, body.resolution || null, completedAt, id).run();
     const user = c.get('user');
     await logAudit(c.env.DB, 'capa_updated', user?.email || 'system', `CAPA ${id} updated`);

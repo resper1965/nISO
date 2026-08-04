@@ -469,7 +469,8 @@ CREATE TABLE IF NOT EXISTS corrective_actions (
     status TEXT DEFAULT 'Open',
     resolution TEXT,
     completed_at DATETIME,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS api_keys (

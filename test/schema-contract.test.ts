@@ -80,6 +80,21 @@ describe('schema contract (real D1)', () => {
     expect(d.processing_name).toBe('proc');
   });
 
+  it('accepts the corrective_actions INSERT the audit-finding handler uses (updated_at)', async () => {
+    // Este é o INSERT de `src/routes/governance.ts` quando um achado de auditoria
+    // é classificado como NC. A coluna `updated_at` não existia, então ele
+    // falhava em produção — e, por vir antes do INSERT em `audit_findings`,
+    // levava o achado junto. Colunas exatas do handler, na ordem do handler:
+    // é o que faz este teste falhar se alguém remover a coluna de novo.
+    await env.DB.prepare(
+      `INSERT INTO corrective_actions (id, project_id, audit_id, control_id, title, description, severity, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'Open', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`
+    ).bind('ca1', 'p1', null, null, 'NC (Maior): registros ausentes', 'descricao', 'High').run();
+    const ca = await env.DB.prepare("SELECT severity, updated_at FROM corrective_actions WHERE id='ca1'").first<any>();
+    expect(ca.severity).toBe('High');
+    expect(ca.updated_at).toBeTruthy();
+  });
+
   it('has the tables the code queries (project_knowledge, scope_changes)', async () => {
     await env.DB.prepare(
       `INSERT INTO project_knowledge (id, project_id, title, type, content, metadata) VALUES (?, ?, ?, ?, ?, ?)`
