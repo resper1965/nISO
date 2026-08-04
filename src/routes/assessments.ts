@@ -366,7 +366,7 @@ assessmentsApp.put('/:id/pricing', async (c) => {
     await logAudit(c.env.DB, 'assessment.pricing_override', c.get('user')?.email ?? 'system', `Pricing ajustado no assessment ${id}`);
     return c.json({ ok: true });
   } catch (e: any) {
-    return c.json({ error: e.message }, 500);
+    return erro500(c, 'Falha ao ajustar precificação do assessment', e);
   }
 });
 
