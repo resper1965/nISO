@@ -158,11 +158,22 @@ publicApp.post('/policies/ack', async (c) => {
     if (!sessionRaw) return c.json({ error: 'Sessão expirada. Por favor, autentique-se novamente.' }, 401);
 
     const session = JSON.parse(sessionRaw);
-    const { policy_type, user_name, user_email } = await c.req.json();
+    const { policy_type } = await c.req.json();
     if (!policy_type) return c.json({ error: 'Tipo/Nome da Política é obrigatório' }, 400);
 
-    const nameToRecord = user_name || session.name;
-    const emailToRecord = user_email || session.email;
+    // Quem assinou sai da SESSÃO, nunca do corpo. Era
+    // `user_name || session.name` / `user_email || session.email`: o corpo
+    // vencia, e quem tivesse verificado o próprio e-mail por OTP gravava ciência
+    // em nome de qualquer colega. Este registro é a evidência de que uma pessoa
+    // NOMEADA leu e aceitou a política — deixar o nome vir de quem escreve o
+    // pedido é o mesmo que não ter registro.
+    //
+    // A sessão `pubpol_sess_*` é criada só depois do OTP conferido contra o
+    // e-mail (ver /policies/verify acima), então `session.email` é identidade
+    // verificada. O portal já manda exatamente esses valores no corpo — para
+    // uso legítimo nada muda; o que sai é a possibilidade de divergir deles.
+    const nameToRecord = session.name;
+    const emailToRecord = session.email;
     const ipAddress = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
     const userAgent = c.req.header('User-Agent') || 'unknown';
 
