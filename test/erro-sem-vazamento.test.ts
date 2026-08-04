@@ -118,7 +118,9 @@ describe('500 correlaciona em vez de vazar', () => {
   it('o 403 de autorização continua devolvendo a própria mensagem', async () => {
     // O `startsWith('Forbidden')` roda ANTES do 500 nos handlers com
     // requireResourceAccess. Se o erro500 tivesse engolido esse ramo, o IDOR
-    // fechado nos PRs #41–#43 voltaria calado — aqui ele grita.
+    // fechado nos PRs #41–#43 e #48 voltaria calado — aqui ele grita.
+    // A cobertura ampla desse invariante está em `test/idor-tenant.test.ts`;
+    // este caso existe para que a regressão apareça junto da mudança que a causa.
     await env.DB.prepare(
       `INSERT INTO projects (id, client_name, standards, org_role, status) VALUES (?,?,?,?,?)`
     ).bind('proj-vaz-outro', 'Outro', 'ISO 27001', 'controller', 'Active').run();
