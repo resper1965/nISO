@@ -76,8 +76,13 @@ describe('migration 0022 — `updated_at` em corrective_actions', () => {
   });
 
   it('preserva as linhas e as demais colunas', async () => {
-    const total = await env.DB.prepare('SELECT count(*) AS n FROM corrective_actions').first<any>();
-    expect(total.n).toBe(2);
+    // Confere as duas linhas semeadas pelo id, e não uma contagem total: outros
+    // testes deste arquivo inserem CAPAs, e um `count(*) = 2` só passaria
+    // enquanto este `it` rodasse antes deles.
+    const sobreviventes = await env.DB.prepare(
+      "SELECT count(*) AS n FROM corrective_actions WHERE id IN ('ca-antiga','ca-fechada')"
+    ).first<any>();
+    expect(sobreviventes.n).toBe(2);
 
     const ca = await env.DB.prepare("SELECT * FROM corrective_actions WHERE id='ca-antiga'").first<any>();
     expect(ca.title).toBe('NC de 2024');
@@ -85,7 +90,42 @@ describe('migration 0022 — `updated_at` em corrective_actions', () => {
     expect(ca.project_id).toBe('p1');
   });
 
-  it('aceita o INSERT do handler depois de aplicada', async () => {
+  it('a coluna adicionada NÃO tem default — quem cria CAPA precisa gravá-la', async () => {
+    // SQLite não aceita default não-constante em `ADD COLUMN`, então a coluna
+    // nasce sem `DEFAULT CURRENT_TIMESTAMP` — diferente do `schema.sql`, onde
+    // ela tem. Consequência: num banco MIGRADO (produção), um INSERT que omita
+    // `updated_at` grava NULL; num banco novo, criado do `schema.sql`, grava a
+    // data. Mesma tabela, comportamento diferente conforme a origem do banco.
+    //
+    // É por isso que `src/routes/capa.ts` grava a coluna explicitamente ao criar
+    // CAPA manual, em vez de confiar no default. Este teste é o que prova que
+    // confiar nele seria errado — e nenhum teste que aplique só o `schema.sql`
+    // consegue mostrar isso.
+    const { results } = await env.DB.prepare('PRAGMA table_info(corrective_actions)').all<any>();
+    const coluna = (results || []).find((c: any) => c.name === 'updated_at');
+    expect(coluna.dflt_value).toBeFalsy();
+
+    await env.DB.prepare(
+      `INSERT INTO corrective_actions (id, project_id, title, status, created_at)
+       VALUES ('ca-sem-updated','p1','Sem updated_at','Open',CURRENT_TIMESTAMP)`
+    ).run();
+    const semDefault = await env.DB.prepare("SELECT updated_at FROM corrective_actions WHERE id='ca-sem-updated'").first<any>();
+    expect(semDefault.updated_at).toBeNull();
+  });
+
+  it('aceita o INSERT de CAPA manual, que grava `updated_at` explicitamente', async () => {
+    // Statement de `src/routes/capa.ts` (POST /projects/:projectId/capa).
+    const agora = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO corrective_actions (id, project_id, audit_id, risk_id, control_id, title, description, severity, assigned_to, due_date, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?, ?)`
+    ).bind('ca-manual', 'p1', null, null, null, 'CAPA manual', 'descricao', 'Medium', 'dono@cliente.com', '2026-12-01', agora, agora).run();
+
+    const manual = await env.DB.prepare("SELECT updated_at FROM corrective_actions WHERE id='ca-manual'").first<any>();
+    expect(manual.updated_at).toBe(agora);
+  });
+
+  it('aceita o INSERT do handler de achado de auditoria depois de aplicada', async () => {
     // A prova final: o statement de `src/routes/governance.ts` que falhava.
     await env.DB.prepare(
       `INSERT INTO corrective_actions (id, project_id, audit_id, control_id, title, description, severity, status, created_at, updated_at)

@@ -60,9 +60,16 @@ projectCapaApp.post('/', async (c) => {
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      `INSERT INTO corrective_actions (id, project_id, audit_id, risk_id, control_id, title, description, severity, assigned_to, due_date, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?)`
-    ).bind(id, projectId, body.audit_id || null, body.risk_id || null, body.control_id || null, body.title, body.description, body.severity, body.assigned_to, body.due_date, now).run();
+      // `updated_at` é gravado explicitamente, e não deixado para o DEFAULT.
+      // `ALTER TABLE ADD COLUMN` não aceita default não-constante em SQLite, então
+      // a coluna criada pela migration 0022 fica SEM default: num banco migrado
+      // (produção) toda CAPA criada por aqui nasceria com `updated_at` NULL,
+      // enquanto num banco novo, criado a partir do `schema.sql`, ela viria
+      // preenchida. Mesma tabela, comportamento diferente conforme a origem do
+      // banco — exatamente a deriva que a 0022 existe para acabar.
+      `INSERT INTO corrective_actions (id, project_id, audit_id, risk_id, control_id, title, description, severity, assigned_to, due_date, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Open', ?, ?)`
+    ).bind(id, projectId, body.audit_id || null, body.risk_id || null, body.control_id || null, body.title, body.description, body.severity, body.assigned_to, body.due_date, now, now).run();
     const user = c.get('user');
     await logAudit(c.env.DB, 'capa_created', user?.email || 'system', `CAPA ${id} created`);
     return c.json({ ok: true, id }, 201);
