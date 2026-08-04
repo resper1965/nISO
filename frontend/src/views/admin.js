@@ -237,12 +237,17 @@ import { navigate, render } from '../router.js';
 
         const isSystemAdmin = S.user && (S.user.role === 'platform_admin' || S.user.role === 'admin' || S.user.role === 'consultor' || S.user.role === 'consultant');
         
+        // Os `value` destas opções vão direto para a API, e `PAPEIS_DE_USUARIO`
+        // (src/schemas/users.ts) só aceita a grafia canônica — por isso
+        // `consultor`, e não `consultant`, que era o que este select mandava. O
+        // `selected` continua reconhecendo as duas grafias porque ainda existem
+        // linhas legadas gravadas como `consultant`.
         let roleOptions = '';
         if (isSystemAdmin) {
             roleOptions = `
                 <option value="">Selecione um papel</option>
                 <option value="platform_admin" ${user && user.role === 'platform_admin' ? 'selected' : ''}>Administrador de Plataforma</option>
-                <option value="consultant" ${user && (user.role === 'consultant' || user.role === 'consultor') ? 'selected' : ''}>Consultor</option>
+                <option value="consultor" ${user && (user.role === 'consultant' || user.role === 'consultor') ? 'selected' : ''}>Consultor</option>
                 <option value="org_admin" ${user && user.role === 'org_admin' ? 'selected' : ''}>Gestor do Cliente</option>
                 <option value="org_user" ${user && user.role === 'org_user' ? 'selected' : ''}>Colaborador do Cliente</option>
             `;
