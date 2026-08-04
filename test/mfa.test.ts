@@ -1,11 +1,11 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import app from '../src/index';
 import { hashPassword, sha256Hex } from '../src/helpers';
 import {
   gerarSegredoTotp, gerarCodigoTotp, verificarCodigoTotp, base32Encode, base32Decode, uriProvisionamento, gerarCodigosRecuperacao,
 } from '../src/services/totp';
-import { applySchema, sessionFor } from './helpers/d1';
+import { baseLimpa, sessionFor } from './helpers/d1';
 
 /**
  * TOTP e o fluxo de MFA.
@@ -81,8 +81,8 @@ describe('TOTP (RFC 6238)', () => {
 describe('Fluxo de MFA', () => {
   let headers: Record<string, string>;
 
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     const hash = await hashPassword('password123');
     await env.DB.prepare(`INSERT INTO users (id, email, password_hash, name, role) VALUES ('u1','a@b.c',?,'A','platform_admin')`).bind(hash).run();
     headers = {
@@ -235,8 +235,8 @@ describe('Fluxo de MFA', () => {
 describe('MFA imposto no login', () => {
   let senhaHash: string;
 
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     senhaHash = await hashPassword('password123');
     await env.DB.prepare(`INSERT INTO users (id, email, password_hash, name, role) VALUES ('u9','mfa@ness.io',?,'Com MFA','platform_admin')`).bind(senhaHash).run();
     await env.DB.prepare(`INSERT INTO users (id, email, password_hash, name, role) VALUES ('u8','sem@ness.io',?,'Sem MFA','platform_admin')`).bind(senhaHash).run();
@@ -312,7 +312,7 @@ describe('MFA imposto no login', () => {
     // passaria sem código: o fator seria contornável com aquilo que ele existe
     // para complementar. Liberar todo o /auth/mfa/* para a sessão pendente era
     // exatamente esse buraco.
-    // Storage isolado por teste: o MFA ativado no teste anterior não sobrevive.
+    // O `beforeEach` zera o storage: o MFA ativado no teste anterior não sobrevive.
     const inicial = await login('mfa@ness.io');
     const setup = await app.fetch(
       new Request('http://localhost/api/v1/auth/mfa/setup', {
@@ -391,8 +391,8 @@ describe('MFA imposto no login', () => {
 });
 
 describe('Reuso de código na janela tolerada', () => {
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
   });
 
   it('grava a janela que casou, não a atual do servidor', async () => {

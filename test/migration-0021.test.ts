@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { env } from 'cloudflare:test';
+import { describe, it, expect, beforeEach } from 'vitest';
+import { env, reset } from 'cloudflare:test';
 import { execSql } from './helpers/d1';
 import migration0021 from '../migrations/0021_project_scope_not_null.sql?raw';
 
@@ -93,7 +93,14 @@ async function indices(tabela: string): Promise<string[]> {
 }
 
 describe('migration 0021 — project_id NOT NULL nas tabelas de concessão de acesso', () => {
-  beforeAll(async () => {
+  // `beforeEach`, e não `beforeAll`: o último teste deste arquivo derruba as
+  // tabelas migradas de propósito e deixa `api_keys_new` para trás, porque a
+  // migration aborta no meio. Enquanto o pool dava rollback por `it()` isso não
+  // vazava; na 0.20 o storage é compartilhado pelo arquivo inteiro e qualquer
+  // teste que rodasse depois inspecionava os destroços em vez do resultado da
+  // migration.
+  beforeEach(async () => {
+    await reset();
     await execSql(LEGADO);
     await popularLegado();
     // O arquivo inteiro, de uma vez. Se qualquer statement abortar, tudo abaixo falha.
@@ -169,8 +176,9 @@ describe('migration 0021 — project_id NOT NULL nas tabelas de concessão de ac
   });
 
   it('com linha órfã, aborta ANTES do DROP — o dado não se perde', async () => {
-    // É o cenário que o PRÉ-VOO do cabeçalho existe para evitar. Autocontido:
-    // desfaz o estado migrado e reconstrói o legado com uma chave sem projeto.
+    // É o cenário que o PRÉ-VOO do cabeçalho existe para evitar. Desfaz o
+    // estado migrado que o `beforeEach` montou e reconstrói o legado com uma
+    // chave sem projeto.
     await execSql(`
       DROP TABLE api_keys;
       DROP TABLE webhooks;

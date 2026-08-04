@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import app from '../src/index';
 import { hashPassword, invalidateUserSessions, validateUpload, MAX_UPLOAD_BYTES } from '../src/helpers';
-import { applySchema } from './helpers/d1';
+import { baseLimpa } from './helpers/d1';
 
 /**
  * Revogação de sessão, limite de upload e rate limit — contra D1 e KV reais.
@@ -32,8 +32,8 @@ function comSessao(token: string) {
 }
 
 describe('Revogação de sessão', () => {
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     const hash = await hashPassword('password123');
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO projects (id, client_name, standards, org_role, status) VALUES ('p1','Cliente','ISO 27001','controller','Active')`),

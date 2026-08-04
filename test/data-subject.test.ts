@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import app from '../src/index';
 import { hashPassword } from '../src/helpers';
 import { interpretarRetencao, ropaVencidos } from '../src/services/data-subject';
-import { applySchema, sessionFor } from './helpers/d1';
+import { baseLimpa, sessionFor } from './helpers/d1';
 
 /**
  * Direitos do titular (LGPD art. 18) e retenção (art. 16).
@@ -41,8 +41,8 @@ describe('Requisição de titular', () => {
   let dpo: Record<string, string>;
   let leitor: Record<string, string>;
 
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     const hash = await hashPassword('password123');
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO projects (id, client_name, standards, org_role, status) VALUES ('p1','Cliente Um','ISO 27001','controller','Active')`),
@@ -165,8 +165,8 @@ describe('Requisição de titular', () => {
 });
 
 describe('Retenção vencida', () => {
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     const hash = await hashPassword('password123');
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO projects (id, client_name, standards, org_role, status) VALUES ('p1','C','ISO 27001','controller','Active')`),

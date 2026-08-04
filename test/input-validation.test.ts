@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import app from '../src/index';
 import { hashPassword } from '../src/helpers';
-import { applySchema, sessionFor } from './helpers/d1';
+import { baseLimpa, sessionFor } from './helpers/d1';
 import { MAX_JSON_BYTES } from '../src/middleware/body-guard';
 
 /**
@@ -15,8 +15,8 @@ import { MAX_JSON_BYTES } from '../src/middleware/body-guard';
 describe('Guarda global de corpo', () => {
   let headers: Record<string, string>;
 
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     const hash = await hashPassword('password123');
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO projects (id, client_name, standards, org_role, status) VALUES ('p1','Cliente','ISO 27001','controller','Active')`),
@@ -106,8 +106,8 @@ describe('Guarda global de corpo', () => {
 describe('Schemas por rota', () => {
   let headers: Record<string, string>;
 
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     const hash = await hashPassword('password123');
     await env.DB.batch([
       env.DB.prepare(`INSERT INTO projects (id, client_name, standards, org_role, status) VALUES ('p1','Cliente','ISO 27001','controller','Active')`),

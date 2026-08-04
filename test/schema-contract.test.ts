@@ -104,9 +104,11 @@ describe('schema contract (real D1)', () => {
   });
 
   it('enforces the append-only audit trail', async () => {
-    // Autocontido: o pool isola o storage por teste, então a linha do teste
-    // anterior não existe aqui — sem inserir, o UPDATE não casaria nada e o
-    // trigger nunca dispararia (o teste passaria por engano).
+    // Autocontido de propósito: insere a própria linha em vez de contar com a
+    // de outro `it`. Sem inserir, o UPDATE poderia não casar nada e o trigger
+    // nunca dispararia — o teste passaria por engano. Este arquivo semeia uma
+    // vez em `beforeAll` e compartilha o storage entre os testes, então cada
+    // `it` que precisa de uma linha específica cria a sua, com id próprio.
     await env.DB.prepare(
       `INSERT INTO audit_logs (id, action, actor, details, project_id, created_at)
        VALUES ('al2','test.action','u@x','detalhe','p1', datetime('now'))`

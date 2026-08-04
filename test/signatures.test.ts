@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import worker from '../src/index';
 import { hashPassword } from '../src/helpers';
-import { applySchema, sessionFor } from './helpers/d1';
+import { baseLimpa, sessionFor } from './helpers/d1';
 
 /**
  * Assinatura eletrônica (aprovação de controle e de evidência) contra D1 REAL.
@@ -24,8 +24,8 @@ describe('Assinatura eletrônica (D1 real)', () => {
   let headers: Record<string, string>;
   let headersDirecao: Record<string, string>;
 
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     const hash = await hashPassword('password123');
     await env.DB.batch([
       env.DB.prepare(
@@ -116,8 +116,8 @@ describe('Assinatura eletrônica (D1 real)', () => {
       const ctrl = await env.DB.prepare("SELECT status FROM compliance_controls WHERE id='ctrl-a51'").first<any>();
       expect(ctrl.status).toBe('Approved');
 
-      // A trilha é conferida aqui dentro, não num `it` seguinte: o pool isola o
-      // storage por teste, então escrita feita num teste não existe no próximo.
+      // A trilha é conferida aqui dentro, não num `it` seguinte: o `beforeEach`
+      // zera o storage, então escrita feita num teste não existe no próximo.
       // Um teste que dependesse disso passaria por engano com a base vazia.
       const log = await env.DB.prepare(
         "SELECT actor, details FROM audit_logs WHERE action = 'control.approved' ORDER BY rowid DESC LIMIT 1"
@@ -166,7 +166,7 @@ describe('Assinatura eletrônica (D1 real)', () => {
     });
 
     it('as duas assinaturas coexistem — mas vêm de DUAS pessoas designadas', async () => {
-      // As duas acontecem no mesmo teste porque o storage é isolado por `it`.
+      // As duas acontecem no mesmo teste porque o `beforeEach` zera o storage.
       // O que a versão anterior deste teste afirmava era que a MESMA pessoa
       // assinava os dois papéis — o oposto de segregação de funções.
       expect((await post('/api/v1/evidence/ev-1/approve', { role: 'ciso', password: 'password123' })).status).toBe(200);

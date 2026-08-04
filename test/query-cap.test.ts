@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import app from '../src/index';
 import { precisaDeTeto, aplicaTeto, comTeto } from '../src/middleware/query-cap';
 import { MAX_PAGE_SIZE, hashPassword } from '../src/helpers';
-import { applySchema, sessionFor } from './helpers/d1';
+import { baseLimpa, sessionFor } from './helpers/d1';
 
 /**
  * Teto automático de linhas.
@@ -54,8 +54,8 @@ describe('Reconhecimento de SELECT (unitário)', () => {
 });
 
 describe('Teto aplicado ao D1 real', () => {
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     await env.DB.prepare(`INSERT INTO projects (id, client_name, standards, org_role, status) VALUES ('p1','C','ISO 27001','controller','Active')`).run();
     const hash = await hashPassword('password123');
     await env.DB.prepare(`INSERT INTO users (id, email, password_hash, name, role) VALUES ('u1','a@b.c',?,'A','platform_admin')`).bind(hash).run();

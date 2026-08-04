@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env, reset } from 'cloudflare:test';
 // `?raw` inlina o arquivo como string em tempo de build (Vite), então roda no
 // pool workerd sem tocar node:fs — que é o que quebrava a suíte antes.
 import schemaSql from '../../schema.sql?raw';
@@ -33,6 +33,28 @@ export async function execSql(sql: string): Promise<void> {
 /** Cria todas as tabelas a partir do schema.sql canônico. */
 export async function applySchema(): Promise<void> {
   await execSql(schemaSql);
+}
+
+/**
+ * Zera o storage e recria o schema. É o que roda em `beforeEach` nos testes que
+ * precisam partir de uma base limpa.
+ *
+ * Até a 0.4 do `@cloudflare/vitest-pool-workers` o pool fazia isso sozinho:
+ * `isolatedStorage` dava rollback do storage ao fim de CADA `it()`, então um
+ * `beforeAll` que semeasse a base valia para o arquivo inteiro e escrita de um
+ * teste não vazava para o seguinte. Na 0.20 esse rollback automático saiu — o
+ * storage passou a ser compartilhado por todo o arquivo, inclusive ENTRE
+ * `describe`s. É por isso que dois `describe`s que semeavam o mesmo projeto
+ * passaram a colidir em `UNIQUE constraint failed: projects.id`.
+ *
+ * `reset()` apaga os dados de todos os bindings, e no D1 isso significa DROP
+ * das tabelas — não DELETE das linhas. Daí o schema ser reaplicado logo em
+ * seguida, e não uma vez só num `beforeAll`. O KV também é limpo, então
+ * qualquer `sessionFor()` precisa vir DEPOIS desta chamada.
+ */
+export async function baseLimpa(): Promise<void> {
+  await reset();
+  await applySchema();
 }
 
 /**

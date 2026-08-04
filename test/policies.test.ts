@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import worker from '../src/index';
-import { applySchema, sessionFor } from './helpers/d1';
+import { baseLimpa, sessionFor } from './helpers/d1';
 
 /**
  * Edição manual de política (POST /api/v1/projects/:id/controls/:controlId/policy)
@@ -33,8 +33,8 @@ describe('Edição manual de política (D1 real)', () => {
   const PROJ = 'proj-policy-1';
   const CONTROL_ID = 'ctrl-a51';
 
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     await env.DB.prepare(
       `INSERT INTO projects (id, client_name, standards, org_role, status) VALUES (?,?,?,?,?)`
     ).bind(PROJ, 'Cliente Política', 'ISO 27001', 'controller', 'Active').run();
@@ -84,8 +84,8 @@ describe('Edição manual de política (D1 real)', () => {
   });
 
   it('incrementa a versão corretamente quando já existe versão anterior', async () => {
-    // O pool de testes do Workers isola o storage por `it()` — a versão criada
-    // no teste anterior não está visível aqui. Semeia a versão 1 diretamente.
+    // O `beforeEach` zera o storage — a versão criada no teste anterior não
+    // está visível aqui. Semeia a versão 1 diretamente.
     await env.DB.prepare(
       `INSERT INTO policy_versions (id, project_id, control_id, version, policy_text, created_by) VALUES (?, ?, ?, 1, 'Texto da versão 1.', 'seed@ness.dev')`
     ).bind('ver-seed-1', PROJ, CONTROL_ID).run();

@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import worker from '../src/index';
 import { hashPassword } from '../src/helpers';
-import { applySchema, sessionFor } from './helpers/d1';
+import { baseLimpa, sessionFor } from './helpers/d1';
 
 /**
  * Isolamento multi-tenant nos routers montados no TOPO (`/api/v1/<coisa>/:id`).
@@ -38,8 +38,8 @@ describe('IDOR cross-tenant nos routers de topo', () => {
   let jsonCiso: Record<string, string>;
   let jsonStaff: Record<string, string>;
 
-  beforeAll(async () => {
-    await applySchema();
+  beforeEach(async () => {
+    await baseLimpa();
     const senha = await hashPassword('password123');
 
     await env.DB.batch([

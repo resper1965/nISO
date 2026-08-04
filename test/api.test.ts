@@ -521,8 +521,14 @@ describe('nISO API (D1 e KV reais)', () => {
     });
 
     it('chave revogada não autentica', async () => {
-      await env.DB.prepare("UPDATE api_keys SET status='Revoked' WHERE id='key-ro'").run();
-      expect((await req(`/api/v1/projects/${PROJ}/risks`, { headers: { 'X-API-Key': CHAVE_LEITURA } })).status).toBe(401);
+      // Chave própria, e não a `key-ro` compartilhada: revogar a compartilhada
+      // deixava todo teste de chave que rodasse depois receber 401 em vez de
+      // exercer o que afirma testar — um `expect(...).toBe(403)` de isolamento
+      // vira 401 e continua passando por outro motivo.
+      await env.DB.prepare(
+        `INSERT INTO api_keys (id, project_id, key_hash, name, permissions, status) VALUES (?,?,?,?,?,?)`
+      ).bind('key-revogada', PROJ, await sha256Hex('chave-revogada'), 'revogada', 'read', 'Revoked').run();
+      expect((await req(`/api/v1/projects/${PROJ}/risks`, { headers: { 'X-API-Key': 'chave-revogada' } })).status).toBe(401);
     });
 
     it('rotas públicas por token dispensam sessão', async () => {
@@ -614,8 +620,8 @@ describe('nISO API (D1 e KV reais)', () => {
     });
 
     it('redefine a senha com token válido, invalida o token e grava o novo hash', async () => {
-      // Fluxo inteiro no mesmo teste: o storage é isolado por teste, então um
-      // token criado noutro `it` não existiria aqui.
+      // Fluxo inteiro no mesmo teste: pedir o token e usá-lo em `it`s separados
+      // acoplaria um ao outro pela ordem de execução.
       const pedido = await req('/api/v1/auth/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
