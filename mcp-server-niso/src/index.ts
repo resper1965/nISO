@@ -51,6 +51,7 @@ const READ_TOOLS = new Set([
   "niso_traceability",
   "niso_list_evidence",
   "niso_audit_pack",
+  "niso_coherence_check",
 ]);
 // Escrita exclusiva do auditor (achados e notas de auditoria).
 const AUDITOR_WRITE_TOOLS = new Set([
@@ -178,6 +179,18 @@ const TOOLS = [
     },
   },
   {
+    name: "niso_coherence_check",
+    description:
+      "Cross-reference check between the project's ISMS/PIMS phases: risks in mitigation without a linked control, and Approved/Implemented controls missing evidence or a written policy. Returns ok:false if any error-severity issue is found.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "The project ID" },
+      },
+      required: ["projectId"],
+    },
+  },
+  {
     name: "niso_generate_policy",
     description: `Generate a policy document for a control via the nISO PolicyAgent (AI draft — must be reviewed before approval). ${WRITE_GUARDRAIL}`,
     inputSchema: {
@@ -286,6 +299,34 @@ const TOOLS = [
     },
   },
   {
+    name: "niso_update_policy",
+    description: `Manually edit the text of a control's policy (NOT AI generation — the exact text provided replaces the current one and creates a new version in the history). Invalidates any prior CISO/CEO approval on that control, since the content changed. ${WRITE_GUARDRAIL}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "The project ID" },
+        controlId: { type: "string", description: "The control ID (e.g. A.5.1 or ctrl-a51)" },
+        text: { type: "string", description: "Full policy text (markdown) to save as the new current version" },
+      },
+      required: ["projectId", "controlId", "text"],
+    },
+  },
+  {
+    name: "niso_update_control",
+    description: `Update fields of an existing SoA control (status, title and/or description). At least one of the three must be provided. This does NOT reset prior CISO/CEO approvals — to rewrite the policy text and invalidate approvals, use niso_update_policy instead. ${WRITE_GUARDRAIL}`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectId: { type: "string", description: "The project ID" },
+        controlId: { type: "string", description: "The control ID (e.g. ctrl-a51)" },
+        status: { type: "string", description: "New control status" },
+        title: { type: "string", description: "New control title" },
+        description: { type: "string", description: "New control description/policy text" },
+      },
+      required: ["projectId", "controlId"],
+    },
+  },
+  {
     name: "niso_create_audit_finding",
     description: `Create a new audit finding. If non-conforming, it automatically creates a linked Corrective Action (CAPA). ${WRITE_GUARDRAIL}`,
     inputSchema: {
@@ -341,9 +382,9 @@ async function nisoGet(path: string) {
   return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 }
 
-async function nisoPost(path: string, body?: unknown) {
+async function nisoPost(path: string, body?: unknown, method: "POST" | "PUT" | "PATCH" = "POST") {
   const response = await fetch(`${NISO_BASE_URL}${path}`, {
-    method: "POST",
+    method,
     headers: {
       Authorization: `Bearer ${NISO_API_KEY}`,
       "x-api-key": NISO_API_KEY || "",
@@ -437,6 +478,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         return await nisoGet(`/api/v1/projects/${projectId}/evidence`);
       }
 
+      case "niso_coherence_check": {
+        const { projectId } = projectIdSchema.parse(args);
+        assertProject(projectId);
+        return await nisoGet(`/api/v1/projects/${projectId}/coherence`);
+      }
+
       case "niso_audit_pack": {
         const { projectId } = projectIdSchema.parse(args);
         assertProject(projectId);
@@ -514,6 +561,45 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const validated = schema.parse(args);
         assertProject(validated.projectId);
         return await nisoPost(`/api/v1/projects/${validated.projectId}/assets`, validated);
+      }
+
+      case "niso_update_policy": {
+        const schema = z.object({
+          projectId: z.string(),
+          controlId: z.string(),
+          text: z.string(),
+        });
+        const validated = schema.parse(args);
+        assertProject(validated.projectId);
+        return await nisoPost(
+          `/api/v1/projects/${validated.projectId}/controls/${validated.controlId}/policy`,
+          { text: validated.text }
+        );
+      }
+
+      case "niso_update_control": {
+        const schema = z
+          .object({
+            projectId: z.string(),
+            controlId: z.string(),
+            status: z.string().optional(),
+            title: z.string().optional(),
+            description: z.string().optional(),
+          })
+          .refine((v) => v.status !== undefined || v.title !== undefined || v.description !== undefined, {
+            message: "Informe ao menos um de status, title ou description",
+          });
+        const validated = schema.parse(args);
+        assertProject(validated.projectId);
+        return await nisoPost(
+          `/api/v1/controls/${validated.controlId}`,
+          {
+            status: validated.status,
+            title: validated.title,
+            description: validated.description,
+          },
+          "PUT"
+        );
       }
 
       case "niso_create_audit_finding": {
