@@ -255,10 +255,10 @@
       <div class="alert-box hidden" id="msg-request"></div>
 
       <form id="form-request-otp" onsubmit="handleRequestOtp(event)">
-        <div class="form-group">
-          <label>Seu Nome Completo</label>
-          <input type="text" id="req-name" required placeholder="Ex: Maria Silva" />
-        </div>
+        <!-- Sem campo de nome de propósito: o backend não lê mais nome nenhum do
+             corpo desta chamada (ver comentário em src/routes/public.ts,
+             request-otp). O nome que vira parte do registro de ciência é
+             derivado do e-mail verificado por OTP, nunca de texto livre. -->
         <div class="form-group">
           <label>Seu E-mail Corporativo</label>
           <input type="email" id="req-email" required placeholder="Ex: maria.silva@suaempresa.com" />
@@ -364,7 +364,6 @@
 
     async function handleRequestOtp(e) {
       e.preventDefault();
-      const name = document.getElementById('req-name').value.trim();
       const email = document.getElementById('req-email').value.trim();
       const msgBox = document.getElementById('msg-request');
       msgBox.classList.add('hidden');
@@ -373,12 +372,14 @@
         const res = await fetch('/api/v1/public/policies/request-otp', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ project_id: state.projectId, name, email })
+          body: JSON.stringify({ project_id: state.projectId, email })
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Erro ao enviar OTP');
 
-        state.name = name;
+        // `state.name` só é definido depois da ETAPA 2 (handleVerifyOtp), com o
+        // nome que o SERVIDOR devolve — derivado do e-mail já verificado por
+        // OTP, nunca do que o formulário mandaria aqui.
         state.email = email;
 
         document.getElementById('sent-email-display').innerText = email;

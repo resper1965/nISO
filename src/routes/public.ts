@@ -31,7 +31,15 @@ publicApp.get('/stats', async (c) => {
 
 publicApp.post('/policies/request-otp', async (c) => {
   try {
-    const { project_id, name, email } = await c.req.json();
+    // O nome NÃO é lido do corpo. Só o e-mail passa por OTP — é o único fato
+    // que este fluxo verifica. Antes, um `name` digitado seguia intacto até a
+    // ciência (`otpData.name` -> `session.name` -> `policy_acknowledgments.
+    // user_name`): quem controlasse o PRÓPRIO e-mail podia se apresentar com o
+    // nome de outra pessoa — um diretor, um colega — e esse nome não
+    // verificado virava a assinatura no registro de conformidade. Derivar
+    // sempre da parte local do e-mail fecha o vetor: o nome do registro nunca
+    // afirma mais do que o e-mail, que é o que foi de fato provado.
+    const { project_id, email } = await c.req.json();
     if (!project_id || !email) {
       return c.json({ error: 'Projeto e E-mail são obrigatórios' }, 400);
     }
@@ -39,7 +47,7 @@ publicApp.post('/policies/request-otp', async (c) => {
     if (!project) return c.json({ error: 'Projeto não encontrado' }, 404);
 
     const cleanEmail = email.trim().toLowerCase();
-    const cleanName = (name || cleanEmail.split('@')[0]).trim();
+    const cleanName = cleanEmail.split('@')[0].trim();
     const otp = genNumericCode(6);
 
     const otpKey = `otp_${project_id}_${cleanEmail}`;

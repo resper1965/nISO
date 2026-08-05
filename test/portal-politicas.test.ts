@@ -133,3 +133,74 @@ describe('Portal público de políticas — ciência eletrônica', () => {
     expect(linha.project_id).toBe(PROJ);
   });
 });
+
+/**
+ * Fluxo completo de OTP (`request-otp` -> `verify-otp` -> `ack`), fora do fixture
+ * fixo acima — é o caminho que um atacante de verdade percorre, e por onde
+ * `session.name` nasce.
+ *
+ * `/policies/request-otp` recebia `name` do corpo e o gravava como estava, sem
+ * verificar nada além do e-mail: quem controlasse o PRÓPRIO e-mail podia se
+ * apresentar como qualquer outra pessoa, e esse nome seguia intacto até virar a
+ * assinatura no registro de conformidade. Achado do Codex na revisão deste PR.
+ *
+ * A correção não filtra o nome — deixa de LER o campo. `cleanName` passa a vir
+ * sempre da parte local do e-mail, o único dado que o OTP de fato prova.
+ */
+describe('Portal público de políticas — o nome nunca vem do formulário de OTP', () => {
+  const PROJ2 = 'proj-portal-otp';
+
+  beforeAll(async () => {
+    // `describe` próprio, schema próprio: sob este pool o storage de um
+    // `beforeAll` não é visto pelo `beforeAll` de outro `describe` no mesmo
+    // arquivo — cada um roda isolado.
+    await applySchema();
+    await env.DB.prepare(
+      `INSERT INTO projects (id, client_name, standards, org_role, status) VALUES (?, 'Cliente OTP', 'ISO 27001', 'controller', 'Active')`
+    ).bind(PROJ2).run();
+  });
+
+  it('quem pede o OTP para o PRÓPRIO e-mail alegando ser outra pessoa não assina como ela', async () => {
+    // O ataque: e-mail é realmente do atacante (ele recebe o OTP), mas o nome
+    // alegado é o de um diretor. Antes desta correção, esse nome sobrevivia
+    // inteiro até o registro de ciência.
+    const pedido = await req('/api/v1/public/policies/request-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: PROJ2, name: 'Diretor Financeiro', email: 'atacante@empresa.com' }),
+    });
+    const { demo_otp } = await pedido.json() as any;
+    expect(demo_otp).toBeTruthy();
+
+    const verificacao = await req('/api/v1/public/policies/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: PROJ2, email: 'atacante@empresa.com', otp: demo_otp }),
+    });
+    const sessao = await verificacao.json() as any;
+    expect(sessao.token).toBeTruthy();
+
+    // O nome nunca chega a existir: nem na resposta do OTP...
+    expect(sessao.name).toBe('atacante');
+    expect(sessao.name).not.toContain('Diretor');
+
+    const res = await worker.fetch(
+      new Request(`http://localhost/api/v1/public/policies/ack?token=${sessao.token}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ policy_type: 'Política de Ética' }),
+      }),
+      env as any
+    );
+    const ackBody = await res.json() as any;
+    expect(res.status, JSON.stringify(ackBody)).toBe(200);
+
+    // ...nem na linha gravada.
+    const linha = await env.DB.prepare(
+      "SELECT user_name, user_email FROM policy_acknowledgments WHERE policy_type = 'Política de Ética'"
+    ).first<any>();
+    expect(linha.user_email).toBe('atacante@empresa.com');
+    expect(linha.user_name).toBe('atacante');
+    expect(linha.user_name).not.toContain('Diretor');
+  });
+});
