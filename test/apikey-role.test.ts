@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { apiKeyRoleViolation, isAuditWrite } from '../src/auth-policy';
 
 const FINDINGS = '/api/v1/audits/AUD-1/findings';
+const FINDING_ITEM = '/api/v1/audit-findings/F-1';
 const GEN_POLICY = '/api/v1/projects/PROJ-1/generate-policy';
 
 describe('isAuditWrite', () => {
@@ -15,6 +16,11 @@ describe('isAuditWrite', () => {
   it('gerar política não é escrita de auditoria', () => {
     expect(isAuditWrite('POST', GEN_POLICY)).toBe(false);
   });
+  it('PUT e DELETE de achado (/audit-findings/:id) também são escrita de auditoria', () => {
+    expect(isAuditWrite('PUT', FINDING_ITEM)).toBe(true);
+    expect(isAuditWrite('DELETE', FINDING_ITEM)).toBe(true);
+    expect(isAuditWrite('GET', FINDING_ITEM)).toBe(false);
+  });
 });
 
 describe('apiKeyRoleViolation — separação consultor × auditor', () => {
@@ -23,6 +29,14 @@ describe('apiKeyRoleViolation — separação consultor × auditor', () => {
   });
   it('consultor NÃO registra achado', () => {
     expect(apiKeyRoleViolation('consultant', 'POST', FINDINGS)).toContain('consultor');
+  });
+  it('consultor NÃO edita nem apaga achado', () => {
+    expect(apiKeyRoleViolation('consultant', 'PUT', FINDING_ITEM)).toContain('consultor');
+    expect(apiKeyRoleViolation('consultant', 'DELETE', FINDING_ITEM)).toContain('consultor');
+  });
+  it('auditor PODE editar/apagar achado', () => {
+    expect(apiKeyRoleViolation('auditor', 'PUT', FINDING_ITEM)).toBeNull();
+    expect(apiKeyRoleViolation('auditor', 'DELETE', FINDING_ITEM)).toBeNull();
   });
   it('auditor lê tudo', () => {
     expect(apiKeyRoleViolation('auditor', 'GET', GEN_POLICY)).toBeNull();

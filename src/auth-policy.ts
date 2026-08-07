@@ -13,7 +13,20 @@
 // deles continua sendo o `writeCapable` do middleware.
 
 export function isAuditWrite(method: string, path: string): boolean {
-  return method === 'POST' && /\/api\/v1\/audits\/[^/]+\/findings\/?$/.test(path);
+  // Criação de achado: POST /api/v1/audits/:auditId/findings
+  if (method === 'POST' && /\/api\/v1\/audits\/[^/]+\/findings\/?$/.test(path)) {
+    return true;
+  }
+  // Edição/remoção de achado: PUT|DELETE /api/v1/audit-findings/:id
+  // Sem isto, um consultor poderia reescrever/apagar achados e o auditor ficaria
+  // barrado de editar os seus — invertendo a separação de papéis.
+  if (
+    (method === 'PUT' || method === 'DELETE') &&
+    /\/api\/v1\/audit-findings\/[^/]+\/?$/.test(path)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
