@@ -15,9 +15,9 @@
 - ⚠️ **Teste flaky pode bloquear deploy**: o pool `@cloudflare/vitest-pool-workers`
   às vezes emite `TypeError: fetch failed / other side closed` no teardown entre
   arquivos (erro do runtime de teste, não do app). Passou em #60/#61, mas é
-  intermitente. Mitigação recomendada: adicionar retry ao passo de testes do
-  deploy, ou fixar/atualizar a versão do pool. **Não** mascarar com
-  `dangerouslyIgnoreUnhandledErrors`.
+  intermitente. **Mitigado no PR #63**: retry de até 2 tentativas no passo de
+  testes de `ci.yml` e `deploy.yml` — falha determinística falha nas duas (não
+  mascara bug real), só a flakiness é resgatada. (Sem `dangerouslyIgnoreUnhandledErrors`.)
 
 ## Segurança
 
@@ -36,27 +36,44 @@
 
 ## Testes e qualidade
 
-- ✅ Suíte de worker (~340 testes) + frontend (140) — verdes localmente e no CI.
+- ✅ Suíte de **worker** (~340 testes) roda no CI e no gate de deploy.
+- ⚠️→✅ Suíte de **frontend** (140, jsdom) era excluída do CI (`vitest.config.mts`
+  ignora `frontend/**`) — só rodava localmente. **Passa a rodar no CI e no deploy
+  a partir do PR #63.**
 - ✅ CI por PR + review automatizado (Codex, CodeRabbit).
-- ⏳ **Teste E2E da integração MCP** contra o ambiente publicado (criar chave real
-  → MCP conecta → consultor escreve, auditor é barrado, projeto errado recusado).
-  Hoje há cobertura unitária da política; falta o loop ponta-a-ponta. Dono:
-  **plataforma** (usar a nova tela de API keys para emitir a chave).
+- ⏳ **Teste E2E da integração MCP** contra o ambiente publicado — roteiro em
+  [`docs/mcp-e2e-validation.md`](./mcp-e2e-validation.md) (criar chave real → MCP
+  conecta → consultor escreve, auditor é barrado, projeto errado recusado). Hoje há
+  cobertura unitária da política (`test/apikey-role.test.ts`); falta rodar o loop.
+  Dono: **plataforma** (emitir a chave pela nova tela de API keys).
 
 ## Dados e operação
 
 - ✅ **Backup do D1**: `npm run db:backup` (runbook em `backups/README.md`).
 - ✅ **Migrations gated** no deploy (não aplica sozinho; recusa código à frente do schema).
-- ✅ **Observabilidade**: log estruturado (uma linha JSON por request) + binding
-  Analytics Engine.
+- ✅ **Log estruturado**: uma linha JSON por request (`wrangler tail`).
+- ⏳ **Analytics Engine**: o código tem o binding *opcional* e `metrica()` é no-op
+  quando ele falta — e `wrangler.jsonc` **não** define o dataset hoje. Configurar o
+  binding ou tratar métrica como pendente. Dono: **operação**.
 - ⏳ **Alerta/monitoramento ativo** (erro 5xx, latência, falha de deploy): confirmar
   se há dashboard/alerta consumindo os logs/métricas. Dono: **operação**.
 - ⏳ **Plano de DR / teste de restore** do backup: validar restauração ao menos uma
   vez. Dono: **operação**.
 
+## Prova de produção (probe em 2026-08-08T13:22Z)
+
+Evidência de que produção reflete o `main` (não só "o deploy foi tentado"):
+
+- `GET https://niso.ness.workers.dev/health` → `{"status":"ok"}`.
+- `/login` serve o shell contendo `nav-api-keys` → a **tela de API keys (#61)** está no ar.
+- O bundle `/assets/login-*.js` contém `openJornadaQuestionnaire` → o **questionário
+  voltou** em produção (a regressão era produção defasada; o deploy automático corrigiu).
+
+Repetir este probe (health + um marcador do commit) a cada deploy relevante.
+
 ## Veredito
 
 - **Piloto assistido com cliente real: pronto.** Pipeline, segurança e dados estão
-  em pé; produção reflete o `main`.
-- **GA / uso desassistido:** fechar os ⏳ acima (E2E do MCP, alerta/monitoramento,
-  DR testado, rotação de segredos) e o ⚠️ do teste flaky.
+  em pé, e o probe acima confirma produção no `main`.
+- **GA / uso desassistido:** fechar os ⏳ acima (E2E do MCP, Analytics/alerta,
+  DR testado, rotação de segredos). O ⚠️ do teste flaky é mitigado pelo PR #63.
