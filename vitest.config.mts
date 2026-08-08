@@ -16,6 +16,15 @@ export default defineWorkersConfig({
     // (node_modules, dist, .idea, .git, .cache) precisa ser reincluído — sem
     // isso o vitest passaria a varrer `node_modules`.
     exclude: [...configDefaults.exclude, 'frontend/**', '.claude/**'],
+    // Reporters extras SO em CI (GITHUB_ACTIONS): local fica com o `default`.
+    // `github-actions` anota a falha na linha exata do PR; `junit` vira resumo
+    // "X passaram / Y falharam". Cobertura NAO entra aqui: o pool de Workers
+    // desta stack (@cloudflare/vitest-pool-workers 0.4.x + vitest 1.5.x) nao
+    // instrumenta v8 de forma confiavel — cobertura do backend fica pendente de
+    // upgrade do pool (ver docs/testing.md).
+    reporters: process.env.GITHUB_ACTIONS
+      ? ['default', 'github-actions', ['junit', { outputFile: 'test-results/worker-junit.xml' }]]
+      : ['default'],
     poolOptions: {
       workers: {
         wrangler: { configPath: './wrangler.test.jsonc' },
