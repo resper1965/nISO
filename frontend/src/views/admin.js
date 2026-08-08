@@ -418,8 +418,10 @@ import { navigate, render } from '../router.js';
 
             let keysRows = '';
             if (pid) {
-                const resp = await api('GET', `/api/v1/projects/${pid}/api-keys`).catch(() => ({ keys: [] }));
-                const keys = (resp && resp.keys) || [];
+                // api() desembrulha o envelope { ok, keys: [...] } e devolve o array direto.
+                // Deixar o erro propagar para o catch externo — não mascarar falha como "sem chaves".
+                const resp = await api('GET', `/api/v1/projects/${pid}/api-keys`);
+                const keys = Array.isArray(resp) ? resp : ((resp && resp.keys) || []);
                 keysRows = keys.length ? keys.map(k => {
                     const active = k.status === 'Active';
                     return `<tr>
@@ -472,6 +474,15 @@ import { navigate, render } from '../router.js';
                         <option value="admin">admin — legado</option>
                     </select>
                 </div>
+                <div class="form-group"><label class="form-label">Expiração</label>
+                    <select id="apikey-exp" class="form-input">
+                        <option value="90">90 dias (recomendado)</option>
+                        <option value="30">30 dias</option>
+                        <option value="180">180 dias</option>
+                        <option value="365">1 ano</option>
+                        <option value="">Sem expiração (não recomendado)</option>
+                    </select>
+                </div>
                 <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:1rem">
                     <button class="btn" onclick="forceCloseModal()" style="background:rgba(255,255,255,0.05);border-color:rgba(255,255,255,0.1)">Cancelar</button>
                     <button class="btn btn-primary" onclick="createApiKey()">Criar</button>
@@ -483,9 +494,12 @@ import { navigate, render } from '../router.js';
         const pid = S.apiKeysProjectId;
         const name = (document.getElementById('apikey-name').value || '').trim();
         const permissions = document.getElementById('apikey-perm').value;
+        const expDays = document.getElementById('apikey-exp').value;
         if (!name) { showToast('Informe um nome', 'error'); return; }
         try {
-            const res = await api('POST', `/api/v1/projects/${pid}/api-keys`, { name, permissions });
+            const body = { name, permissions };
+            if (expDays) body.expires_at = new Date(Date.now() + parseInt(expDays, 10) * 86400000).toISOString();
+            const res = await api('POST', `/api/v1/projects/${pid}/api-keys`, body);
             const key = (res && res.key) || '';
             openModal(`
                 <div class="modal-header"><span class="modal-title">Chave criada</span><button class="btn-ghost" onclick="forceCloseModal(); render();">Fechar</button></div>
