@@ -28,5 +28,15 @@ jobs:
         run: cd frontend && npm ci && npm run build
       - name: Build MCP Server
         run: cd mcp-server-niso && npm ci && npm run build
+      # Retry por flakiness conhecida do @cloudflare/vitest-pool-workers: às vezes
+      # o pool emite `fetch failed / other side closed` no teardown entre arquivos
+      # (erro do runtime, não do app). Uma falha DETERMINÍSTICA falha nas duas
+      # tentativas — o retry só resgata a flakiness, não mascara bug real.
       - name: Run Tests
-        run: npm test -- --run
+        run: |
+          n=0; max=2
+          until npm test -- --run; do
+            n=$((n+1))
+            if [ "$n" -ge "$max" ]; then echo "::error::Testes falharam após $max tentativas"; exit 1; fi
+            echo "::warning::Testes falharam (tentativa $n/$max) — provável flakiness do vitest-pool-workers no teardown; repetindo."
+          done

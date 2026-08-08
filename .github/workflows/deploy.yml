@@ -48,8 +48,17 @@ jobs:
       - name: TypeScript Check
         run: npx tsc --noEmit
 
+      # Retry por flakiness conhecida do @cloudflare/vitest-pool-workers no teardown
+      # (fetch failed / other side closed). Falha determinística falha nas duas
+      # tentativas — não mascara bug real, só evita que o pool derrube um deploy.
       - name: Run Tests
-        run: npm test -- --run
+        run: |
+          n=0; max=2
+          until npm test -- --run; do
+            n=$((n+1))
+            if [ "$n" -ge "$max" ]; then echo "::error::Testes falharam após $max tentativas"; exit 1; fi
+            echo "::warning::Testes falharam (tentativa $n/$max) — provável flakiness do vitest-pool-workers no teardown; repetindo."
+          done
 
       - name: Build Frontend
         run: cd frontend && npm ci && npm run build
