@@ -40,7 +40,7 @@ jobs:
       - name: Run Tests
         run: |
           set -o pipefail
-          run() { npm test -- --run 2>&1 | tee /tmp/niso-test.log; }
+          run() { npm run test:coverage 2>&1 | tee /tmp/niso-test.log; }
           if run; then exit 0; fi
           if grep -qE "other side closed|fetch failed" /tmp/niso-test.log; then
             echo "::warning::Falha casa a flakiness conhecida do pool no teardown; repetindo UMA vez."
@@ -59,6 +59,7 @@ jobs:
           name: test-reports
           path: |
             test-results/**
+            coverage/**
             frontend/test-results/**
             frontend/coverage/**
           if-no-files-found: ignore
