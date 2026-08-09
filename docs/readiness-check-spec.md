@@ -87,12 +87,20 @@ documentos dos controles **aplicáveis** do Anexo A conforme a SoA.
 
 ## Camada 2 — IA (fase 2, opcional `?ai=1`)
 
-`ReadinessAgent` (reusa `BaseAgent` + Workers AI, como o `AssessmentAgent`):
-recebe o estado consolidado + o conhecimento da skill `iso27001` no prompt, e
-aponta **inconsistências de conteúdo** que a query não pega (ex.: escopo não
-cobre um ativo citado na RoPA; duas políticas se contradizem). Cada observação
-**cita** o documento/controle que a sustenta. É seção separada no payload
+`ReadinessAgent` (reusa `BaseAgent`, como o `AssessmentAgent`): recebe o estado
+consolidado + o conhecimento da skill `iso27001` no prompt, e aponta
+**inconsistências de conteúdo** que a query não pega (ex.: escopo não cobre um
+ativo citado na RoPA; duas políticas se contradizem). Cada observação **cita** o
+documento/controle que a sustenta. É seção separada no payload
 (`ai_observacoes`), claramente marcada como "assistida por IA — revisar".
+
+**Modelo:** `@cf/meta/llama-3.3-70b-instruct` (Workers AI), roteado pelo AI
+Gateway já configurado (`AI_GATEWAY_URL` / gateway `n-iso`) — bem mais capaz que
+o `llama-3.1-8b` do `AssessmentAgent`, sem sair da Cloudflare. Parâmetros de
+aterramento obrigatórios: **temperatura baixa** (~0.2), **chunking** do conteúdo
+grande do ISMS, e prompt que **exige citação** da evidência em cada observação
+(sem citação, vira gap da camada determinística, não achado de IA). Como a F2 é
+sob demanda (`?ai=1`), o custo do modelo maior fica contido.
 
 ## UI
 
