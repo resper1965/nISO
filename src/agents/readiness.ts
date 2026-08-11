@@ -44,7 +44,7 @@ FORMATO DA RESPOSTA: responda SOMENTE com um array JSON válido, sem texto ao re
         success: true,
         content,
         confidence: 0.85,
-        metadata: { model: reasoningModel(this.env), source: 'workers-ai' },
+        metadata: { model: 'llama-3.3-70b-instruct-fp8-fast', source: 'workers-ai' },
       };
     } catch (error: any) {
       return { success: false, content: '', confidence: 0, metadata: { error: error?.message } };

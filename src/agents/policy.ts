@@ -56,7 +56,7 @@ ${standardReference || 'Use o conhecimento base da ISO 27001:2022 Anexo A.'}
       const data = await res.json() as any;
       const content = data?.result?.response || data?.choices?.[0]?.message?.content || '';
       if (!content) return null;
-      return { content, model: gatewayModel(this.env) };
+      return { content, model: 'openai/gpt-4.1' };
     } catch { return null; }
   }
 
@@ -67,7 +67,7 @@ ${standardReference || 'Use o conhecimento base da ISO 27001:2022 Anexo A.'}
       temperature: 0.3,
       max_tokens: 4096,
     });
-    return { content: response.response, model: reasoningModel(this.env) };
+    return { content: response.response, model: 'llama-3.3-70b-instruct-fp8-fast' };
   }
 
   async run(prompt: string, context: AgentContext): Promise<AgentResponse> {

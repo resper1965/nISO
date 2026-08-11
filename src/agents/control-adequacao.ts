@@ -51,7 +51,7 @@ FORMATO: responda SOMENTE com um array JSON válido, sem texto ao redor:
         max_tokens: 2048,
       });
       const content = (response?.response ?? '').toString();
-      return { success: true, content, confidence: 0.8, metadata: { model: reasoningModel(this.env), source: 'workers-ai' } };
+      return { success: true, content, confidence: 0.8, metadata: { model: 'llama-3.3-70b-instruct-fp8-fast', source: 'workers-ai' } };
     } catch (error: any) {
       return { success: false, content: '', confidence: 0, metadata: { error: error?.message } };
     }

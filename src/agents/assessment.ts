@@ -52,7 +52,7 @@ ESTRUTURA DA RESPOSTA (Markdown):
       if (!res.ok) return null;
       const data = await res.json() as any;
       const content = data?.result?.response || data?.choices?.[0]?.message?.content || '';
-      return content ? { content, model: gatewayModel(this.env) } : null;
+      return content ? { content, model: 'openai/gpt-4.1' } : null;
     } catch { return null; }
   }
 
@@ -62,7 +62,7 @@ ESTRUTURA DA RESPOSTA (Markdown):
       temperature: 0.1,
       max_tokens: 4096,
     });
-    return { content: response.response, model: reasoningModel(this.env) };
+    return { content: response.response, model: 'llama-3.3-70b-instruct-fp8-fast' };
   }
 
   async run(assessmentData: string, context: AgentContext): Promise<AgentResponse> {
