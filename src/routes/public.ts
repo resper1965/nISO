@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { Bindings } from '../index';
-import { logAudit, genNumericCode, erro500 } from '../helpers';
+import { logAudit, genNumericCode, erro500, sendEmail } from '../helpers';
 
 export const publicApp = new Hono<{ Bindings: Bindings }>();
 
@@ -53,13 +53,23 @@ publicApp.post('/policies/request-otp', async (c) => {
 
     await c.env.SESSIONS.put(otpKey, JSON.stringify(otpData), { expirationTtl: 900 });
 
-    console.log(`[OTP SIMULATION] Código para ${cleanEmail} (Projeto ${project_id}): ${otp}`);
+    // O OTP é a ÚNICA credencial do portal público de políticas. Ele deve chegar
+    // só ao dono do e-mail — nunca no corpo da resposta (isso derrubaria o 2º
+    // fator: qualquer um que conheça o project_id leria as políticas do tenant).
+    // Entrega por e-mail; o eco em `demo_otp` fica restrito a dev/test.
+    await sendEmail(
+      c,
+      cleanEmail,
+      'Seu código de acesso às políticas',
+      `<p>Olá ${cleanName},</p><p>Seu código de verificação é <strong>${otp}</strong>. Ele expira em 15 minutos.</p>`
+    );
     await logAudit(c.env.DB, 'policy.otp_requested', cleanEmail, `OTP de acesso às políticas solicitado para projeto ${project_id}`);
 
+    const isDevOrTest = c.env.ENVIRONMENT === 'development' || c.env.ENVIRONMENT === 'test';
     return c.json({
       ok: true,
-      message: `Código de verificação enviado para ${cleanEmail}. (Para ambiente de demonstração: ${otp})`,
-      demo_otp: otp
+      message: `Código de verificação enviado para ${cleanEmail}.`,
+      ...(isDevOrTest ? { demo_otp: otp } : {})
     });
   } catch (e: any) {
     return erro500(c, 'Falha ao gerar código OTP', e);
