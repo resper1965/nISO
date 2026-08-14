@@ -45,4 +45,16 @@ describe('OTP do portal público de políticas', () => {
     const body = await res.json() as any;
     expect(body.demo_otp).toMatch(/^\d{6}$/);
   });
+
+  it('rate-limit: após 5 pedidos no mesmo projeto+e-mail, o 6º é 429', async () => {
+    const e = { ...env, ENVIRONMENT: 'test' } as any;
+    const pedir = () => worker.fetch(new Request('http://localhost/api/v1/public/policies/request-otp', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: PID, email: 'flood@cliente.com' }),
+    }), e);
+    for (let i = 0; i < 5; i++) {
+      expect((await pedir()).status).toBe(200);
+    }
+    expect((await pedir()).status).toBe(429);
+  });
 });
