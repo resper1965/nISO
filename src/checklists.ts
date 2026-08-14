@@ -234,6 +234,7 @@ export const PHASE_CHECKLISTS: Record<number, ChecklistItem[]> = {
     { id: 'p33_4', text: 'Decisões e ações registradas', category: 'document' },
   ],
   34: [ // Readiness Review
+    { id: 'p34_0', text: 'Norma(s) e escopo do certificado definidos (27001 / 27701 autônomo / integrado)', category: 'document' },
     { id: 'p34_1', text: 'Todas as políticas aprovadas', category: 'evidence' },
     { id: 'p34_2', text: 'SoA finalizado com evidências', category: 'evidence' },
     { id: 'p34_3', text: 'Risk treatment plan implementado', category: 'evidence' },
