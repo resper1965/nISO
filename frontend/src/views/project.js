@@ -995,13 +995,13 @@ const ISO_GUIDELINES = {
                     corpo += `<ol style="font-size:0.82rem; line-height:1.5; padding-left:1.2rem; margin:0">${it.proximos_passos.map(s => `<li>${escapeHTML(s)}</li>`).join('')}</ol>`;
                 }
             } else {
-                // Sem contradição: se a cobertura está completa, dizemos isso; o
-                // motivo real vem do backend (fonte/motivo), não um texto genérico.
-                const motivoTxt = r.motivo ? escapeHTML(r.motivo) : 'A interpretação assistida por IA não está disponível no momento.';
+                // Sem contradição: com a fase completa, dizemos isso em vez de
+                // "sem respostas suficientes"; o motivo real vem do backend.
+                const motivoSuffix = r.motivo ? ` (${escapeHTML(r.motivo)})` : '';
                 const abre = completo
-                    ? 'As respostas desta fase estão completas. A interpretação por IA não pôde ser gerada agora — '
-                    : 'A interpretação assistida por IA não está disponível agora — ';
-                corpo += `<p style="font-size:0.83rem; color:var(--text-dim); line-height:1.5">${abre}${motivoTxt}</p>`;
+                    ? 'As respostas desta fase estão completas, mas a interpretação por IA não pôde ser gerada agora.'
+                    : 'A interpretação assistida por IA está indisponível no momento.';
+                corpo += `<p style="font-size:0.83rem; color:var(--text-dim); line-height:1.5">${abre}${motivoSuffix}</p>`;
             }
 
             corpo += `<div style="margin-top:1.25rem; padding-top:1rem; border-top:1px solid var(--border)">
