@@ -33,6 +33,16 @@ describe('resolveHostIsPublic (S8 / DNS rebinding)', () => {
     expect(await resolveHostIsPublic('v6.example', f)).toBe(false);
   });
 
+  it('AAAA IPv4-mapeado em HEX para loopback (::ffff:7f00:1) → false', async () => {
+    const f = dohMock({ 'hex.example:A': [], 'hex.example:AAAA': [{ type: 28, data: '::ffff:7f00:1' }] });
+    expect(await resolveHostIsPublic('hex.example', f)).toBe(false);
+  });
+
+  it('AAAA IPv4-mapeado em HEX para metadata (::ffff:a9fe:a9fe) → false', async () => {
+    const f = dohMock({ 'meta.example:A': [], 'meta.example:AAAA': [{ type: 28, data: '::ffff:a9fe:a9fe' }] });
+    expect(await resolveHostIsPublic('meta.example', f)).toBe(false);
+  });
+
   it('mistura público + privado → false (basta um interno)', async () => {
     const f = dohMock({ 'mix.example:A': [{ type: 1, data: '8.8.8.8' }, { type: 1, data: '10.0.0.5' }], 'mix.example:AAAA': [] });
     expect(await resolveHostIsPublic('mix.example', f)).toBe(false);

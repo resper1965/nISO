@@ -116,8 +116,17 @@ function isPrivateIpv6(addr: string): boolean {
   if (v6 === '::1' || v6 === '::') return true;
   if (/^fe[89ab][0-9a-f]:/i.test(v6)) return true;   // link-local fe80::/10
   if (/^f[cd][0-9a-f]{2}:/i.test(v6)) return true;   // ULA fc00::/7
-  const m = v6.match(/(\d+\.\d+\.\d+\.\d+)$/);        // ::ffff:1.2.3.4
+  const m = v6.match(/(\d+\.\d+\.\d+\.\d+)$/);        // ::ffff:1.2.3.4 (decimal)
   if (m) { const c = canonicalizeIpv4(m[1]); if (c && isPrivateIpv4(c)) return true; }
+  // IPv4-mapeado em HEX: ::ffff:7f00:1 (loopback), ::ffff:a9fe:a9fe (metadata).
+  // Um AAAA controlado pelo atacante pode vir nesta forma; sem isto passava como
+  // público e o rebinding para IP interno seguia aberto (P1 da revisão do Codex).
+  const mh = v6.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (mh) {
+    const hi = parseInt(mh[1], 16), lo = parseInt(mh[2], 16);
+    const dotted = [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255].join('.');
+    if (isPrivateIpv4(dotted)) return true;
+  }
   return false;
 }
 
