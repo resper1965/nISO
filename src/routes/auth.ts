@@ -50,6 +50,16 @@ authApp.post('/login', async (c) => {
     if (!valid.success) return valid.response;
     const { email, password } = valid.data;
 
+    // S6: além do teto por IP acima, um teto por CONTA-ALVO. O limite por IP não
+    // freia um ataque distribuído (muitos IPs) contra uma única conta; este fecha
+    // isso. Janela curta (reset em 5 min) e teto folgado o bastante para não
+    // atrapalhar o usuário legítimo, mas apertar o brute-force. Chave por email
+    // normalizado.
+    const contaKey = email.trim().toLowerCase();
+    if (!(await rateLimit(c.env.SESSIONS, `login:acct:${contaKey}`, 10, 300))) {
+      return c.json({ error: 'Muitas tentativas para esta conta. Tente novamente em alguns minutos.' }, 429);
+    }
+
     const user = await c.env.DB.prepare(
       'SELECT id, email, name, role, client_project_id, password_hash, requires_password_change, totp_enabled FROM users WHERE email = ?'
     ).bind(email).first() as any;
