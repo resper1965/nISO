@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
-import { genId, genToken, genNumericCode, rateLimit, hashPassword, verifyPassword, logAudit, sendEmail, escapeHtml, invalidateUserSessions, SESSION_TTL_SEC, erro500 } from '../helpers';
+import { genId, genToken, genNumericCode, rateLimit, rateLimitD1, hashPassword, verifyPassword, logAudit, sendEmail, escapeHtml, invalidateUserSessions, SESSION_TTL_SEC, erro500 } from '../helpers';
 
 /** IP do cliente para rate limiting (Cloudflare popula CF-Connecting-IP) */
 function clientIp(c: any): string {
@@ -52,11 +52,13 @@ authApp.post('/login', async (c) => {
 
     // S6: além do teto por IP acima, um teto por CONTA-ALVO. O limite por IP não
     // freia um ataque distribuído (muitos IPs) contra uma única conta; este fecha
-    // isso. Janela curta (reset em 5 min) e teto folgado o bastante para não
-    // atrapalhar o usuário legítimo, mas apertar o brute-force. Chave por email
-    // normalizado.
+    // isso. Usa o contador ATÔMICO de janela fixa no D1 (rateLimitD1): sendo um
+    // controle de segurança, não pode vazar sob concorrência (o get-then-put do KV
+    // não é atômico) nem ter a janela deslizante do TTL — os dois pontos do Codex
+    // no #113. Chave por email normalizado; keyspace limitado (uma linha por
+    // conta), sem TTL.
     const contaKey = email.trim().toLowerCase();
-    if (!(await rateLimit(c.env.SESSIONS, `login:acct:${contaKey}`, 10, 300))) {
+    if (!(await rateLimitD1(c.env.DB, `login:acct:${contaKey}`, 10, 300))) {
       return c.json({ error: 'Muitas tentativas para esta conta. Tente novamente em alguns minutos.' }, 429);
     }
 
