@@ -24,6 +24,16 @@ describe('CORS allowlist (S3)', () => {
     expect(res.headers.get('access-control-allow-origin')).toBe('https://n-iso.ness.com.br');
   });
 
+  it('permite loopback localhost (dev Vite) em qualquer porta', async () => {
+    const res = await req('http://localhost:5173');
+    expect(res.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+  });
+
+  it('permite loopback 127.0.0.1 (dev Vite) em qualquer porta', async () => {
+    const res = await req('http://127.0.0.1:5173');
+    expect(res.headers.get('access-control-allow-origin')).toBe('http://127.0.0.1:5173');
+  });
+
   it('NÃO devolve ACAO para origem desconhecida', async () => {
     const res = await req('https://evil.example');
     expect(res.headers.get('access-control-allow-origin')).toBeNull();
