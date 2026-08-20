@@ -1,73 +1,102 @@
 # Avaliação de segurança — OWASP Top 10 (2021) + RFC 9116
 
 Revisão da aplicação nISO (Workers/Hono/D1) contra o OWASP Top 10:2021 e a
-disponibilidade de `security.txt`. Baseada em leitura do código (`src/`), não em
-pentest dinâmico. Legenda: ✅ adequado · ⚠️ gap/hardening · 🔴 corrigir.
+disponibilidade de `security.txt`. Baseada em **leitura de código** (`src/`,
+`frontend/`), não em pentest dinâmico — onde a conclusão depende do ambiente em
+execução (ex.: entrega do endpoint), isso é dito explicitamente.
+Legenda: ✅ adequado · ⚠️ gap/hardening · 🔴 corrigir.
 
 ## Resumo
 
-O app já é endurecido: `secureHeaders` (HSTS + CSP restritiva), CORS, rate-limit,
-PBKDF2 salgado com comparação em tempo constante, MFA/TOTP, isolamento de tenant,
-log estruturado + trilha de auditoria, e `security.txt` (RFC 9116) já publicado.
+O app tem base endurecida: `secureHeaders` (HSTS + CSP restritiva), CORS,
+rate-limit, PBKDF2 salgado com comparação em tempo constante (e auto-migração de
+hash legado no login), MFA/TOTP, isolamento de tenant, log estruturado + trilha de
+auditoria, e `security.txt` (RFC 9116) implementado em código.
 
-Achados abertos: **1 🔴** (token em texto claro — já é o D1/P1 do backlog) e **4 ⚠️**
-de hardening. Nenhuma injeção SQL (queries parametrizadas) nem XSS óbvio (escape no
-frontend) encontrados.
+Achados: **1 🔴** (S1 token em claro — corrigido no #110) · **1 🔴 web** (S7 XSS
+armazenado — corrigido no #112) · **6 ⚠️** de hardening (S2, S3, S5, S6, S8, S-log,
+com S4 já implementado). Queries são parametrizadas (sem SQL injection).
 
 | OWASP | Situação | Item |
 |-------|----------|------|
 | A01 Broken Access Control | ✅ | isolamento por `requireResourceAccess` (endurecido no #107) |
-| A02 Cryptographic Failures | 🔴 ⚠️ | S1 token texto claro · S4 senha legada SHA-256 |
-| A03 Injection | ✅ | queries parametrizadas (`.bind`); `escapeHTML` no front |
+| A02 Cryptographic Failures | 🔴→✅ ⚠️ | S1 token (corrigido #110) · S4 senha legada (já implementado) |
+| A03 Injection | 🔴→✅ | S7 XSS armazenado em `pricing_notas` (corrigido #112); SQL parametrizado |
 | A04 Insecure Design | ✅ | rate-limit por custo, invalidação de aprovação por integridade |
 | A05 Security Misconfiguration | ⚠️ | S2 CSP `unsafe-inline` · S3 CORS `*` |
-| A06 Vulnerable Components | ⚠️ | S5 rodar `npm audit` no CI |
-| A07 Auth Failures | ✅ ⚠️ | PBKDF2 100k + MFA · S6 login rate-limit só por IP |
+| A06 Vulnerable Components | ⚠️→✅ | S5 `npm audit` no CI (adicionado #111, informativo) |
+| A07 Auth Failures | ✅ ⚠️ | PBKDF2 100k + MFA · S6 login rate-limit por IP (adicionado por-conta #113) |
 | A08 Integrity Failures | ✅ | CI + deploy versionado; sem desserialização insegura |
-| A09 Logging & Monitoring | ✅ | log JSON por request + `logAudit` (sem PII) |
-| A10 SSRF | ✅ | sem fetch a URL controlada por usuário no core |
+| A09 Logging & Monitoring | ✅ ⚠️ | log JSON + `logAudit` presentes — **mas gravam PII** (ver S-log) |
+| A10 SSRF | ⚠️ | S8 webhook: guard bloqueia IP interno literal, mas **não resolve DNS** (rebinding) |
 
-## security.txt (RFC 9116) — ✅
+## security.txt (RFC 9116)
 
-`GET /.well-known/security.txt` já servido em `src/index.ts`. Correto:
-`Contact` (e-mail + advisory), `Expires` **calculado** (180 d — não vence esquecido),
-`Canonical`, `Policy` → `SECURITY.md` (presente), `Preferred-Languages`. Nada a fazer.
+`GET /.well-known/security.txt` **implementado em `src/index.ts`** (não verificado
+em produção — revisão só de código): `Contact` (e-mail + advisory), `Expires`
+**calculado** (180 d — não vence esquecido), `Canonical`, `Policy` → `SECURITY.md`
+(presente), `Preferred-Languages`. Confirmar a entrega no Worker publicado
+(`curl https://<host>/.well-known/security.txt`) antes de anunciar a operadores.
 
 ---
 
 ## Achados
 
-### S1 · Token do repositório em texto claro no D1 — 🔴 (A02)
-`projects.repository_token` gravado em claro. O #107 redigiu na resposta; falta cifrar
-em repouso. **Já é o D1/P1** em `backlog-plan.md` (AES-GCM + secret + migração).
+### S1 · Token do repositório em texto claro no D1 — 🔴 → corrigido (#110) (A02)
+`projects.repository_token` era gravado em claro. Cifrado em repouso (AES-GCM) no
+#110; leitura decifrada por `getRepositoryToken`; migração do legado por endpoint
+admin. Rastreado no plano do backlog (PR #108, `docs/backlog-plan.md`, item D1/P1).
+
+### S7 · XSS armazenado em `pricing_notas` — 🔴 → corrigido (#112) (A03)
+`pricing_notas` (texto livre, `PUT /assessments/:id/pricing`, sem sanitização) era
+interpolado cru num `<textarea>` passado a `openModal` (innerHTML). `</textarea>
+<img src=x onerror=...>` executava ao abrir o modal — e o CSP `unsafe-inline`
+permite o handler. Escapado no sink (`escapeHTML`) no #112.
 
 ### S2 · CSP com `script-src 'unsafe-inline'` — ⚠️ (A05/A03)
 Concessão consciente (~324 `onclick=` inline). Enquanto durar, o CSP não barra XSS
-injetado; o valor vem de `object-src/base-uri/form-action/frame-ancestors 'none'` e do
-`escapeHTML`. **Upgrade:** migrar `onclick` → `addEventListener` e trocar por `nonce`.
+injetado (ver S7); o valor vem de `object-src/base-uri/form-action/frame-ancestors
+'none'` e do escape no sink. **Upgrade:** migrar `onclick` → `addEventListener` e
+trocar por `nonce`. Refactor grande — decidir escopo com o time.
 
 ### S3 · CORS `origin: '*'` — ⚠️ (A05)
 Risco real baixo (auth por Bearer em `localStorage`, sem cookies → sem CSRF por
-credencial). Ainda assim, restringir aos domínios conhecidos (app + preview) reduz
-superfície e permite endurecer `allowHeaders`. **Ação:** allowlist de origens.
+credencial). Restringir aos domínios conhecidos (app + preview) reduz superfície.
+**Ação:** allowlist de origens (requer a lista canônica de domínios).
 
-### S4 · Caminho legado de senha SHA-256 sem sal — ⚠️ (A02/A07)
-`verifyPassword` aceita hashes antigos sem `:` como SHA-256 de rodada única, sem sal —
-hash rápido, vulnerável a rainbow/GPU. Comparação é em tempo constante (bom).
-**Ação:** re-hash para PBKDF2 no próximo login bem-sucedido e remover o ramo legado
-depois de migrar a base.
+### S4 · Senha legada SHA-256 — ✅ já implementado (A02/A07)
+O login (`auth.ts:61-65`) já re-hasheia para PBKDF2 no acesso bem-sucedido de uma
+conta com hash legado. O ramo de verificação legado permanece até toda a base
+migrar; removê-lo depois é a única pendência (cleanup, não risco aberto).
 
-### S5 · Sem `npm audit` no CI — ⚠️ (A06)
-Não há gate de vulnerabilidade de dependência. **Ação:** `npm audit --audit-level=high`
-(root + frontend + mcp-server) como passo do CI, não bloqueante no início.
+### S5 · `npm audit` no CI — ✅ adicionado (#111) (A06)
+Job `audit` (root + frontend + mcp-server), `--audit-level=high`, **informativo**
+(não bloqueante — só `test` é required). Apertar para bloqueante quando a base
+estiver limpa.
 
-### S6 · Login rate-limit só por IP — ⚠️ (A07)
-`login:<ip>` 20/5min. Um escritório inteiro compartilha o teto (falso positivo) e um
-ataque distribuído numa conta não é freado por conta. **Ação:** somar limite por
-conta-alvo (`login:acct:<email>`) e considerar apertar a janela.
+### S6 · Login rate-limit por IP — ✅ endurecido (#113) (A07)
+Somado um teto por **conta-alvo** (`login:acct:<email>` 10/5min) ao teto por IP,
+para frear ataque distribuído sobre uma conta.
+
+### S8 · Webhook SSRF — DNS rebinding — ⚠️ (A10)
+`POST /projects/:id/webhooks` persiste a URL do chamador e a consome via `fetch`.
+`isValidWebhookUrl` já bloqueia IP interno **literal** (loopback, privado,
+link-local/metadata, IPv6 interno, codificações alternativas), mas **não resolve
+DNS** — um hostname público que resolva para IP interno (rebinding) passa. Fechar
+exige resolver e validar/pinar o IP resolvido, ou allowlist de egress — decisão de
+política, não corrigido aqui.
+
+### S-log · Trilha de auditoria contém PII — ⚠️ (A09)
+`logAudit` grava `actor` e `details` verbatim no D1; chamadores passam e-mail, nome
+e trechos de conteúdo (ex.: prefixo de prompt de IA). Não é ausência de PII — os
+logs precisam do ciclo de vida/retenção e das proteções LGPD correspondentes.
+**Ação:** classificar o dado, definir retenção e minimizar o que entra em `details`.
 
 ---
 
-## Ordem sugerida
+## Ordem sugerida (restante)
 
-**S1** (já P1) → **S5** (rápido, cobre risco desconhecido) → **S4** → **S6** → **S3** → **S2** (maior, depende de refactor de front).
+**S2** (CSP nonce — maior, decisão de escopo) · **S3** (CORS allowlist — precisa a
+lista de domínios) · **S8** (SSRF/DNS — decisão de política de egress) ·
+**S-log** (retenção/minimização de PII no audit). Itens 🔴 e os rápidos (S5/S6/S7)
+já entraram ou têm PR.
