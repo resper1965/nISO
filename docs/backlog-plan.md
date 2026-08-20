@@ -7,10 +7,10 @@ Esforço: **S** ≤2h · **M** meio dia · **L** ≥1 dia. Prioridade: P1 (fazer
 
 | ID | Débito | Sev | Esforço | Prio |
 |----|--------|-----|---------|------|
-| D1 | `repository_token` em texto claro no D1 | 🔴 | M | **P1** |
+| D1 | `repository_token` em texto claro no D1 | 🔴→✅ | M | feito (#110) |
 | D2 | `evaluation_status` sem enum/CHECK (#6) | 🟠 | M | P2 |
 | D3 | Sem endpoint de revogar aprovação (#3) | 🟡 | S | P3 |
-| D4 | `GET /assessments` 403 p/ chave consultor (#9) | 🟡 | S+? | P3 |
+| D4 | `GET /assessments` 403 p/ chave consultor (#9) | ℹ️ | — | por design |
 | D5 | Sem OpenAPI + `control-adequacao` base sem handler (#7/#8) | 🟢 | M | P4 |
 | D6 | Tela de governança (UI) | 🟢 | M | paralelo |
 
@@ -24,19 +24,16 @@ Ordem: **D1 → D2 → D3/D4 → D5**. D6 corre em paralelo (branch própria).
 `projects.repository_token`. O #107 removeu o campo das respostas (`redactProject`),
 mas quem tem acesso ao D1 ainda lê o segredo.
 
-**Correção.**
-1. Helper de cripto (WebCrypto AES-GCM) com chave derivada de um secret novo
-   (`TOKEN_ENC_KEY`, via `wrangler secret`); nonce por registro.
-2. Migração: coluna `repository_token_enc` (BLOB/text base64). Script admin
-   (endpoint protegido, uso único) cifra os tokens existentes.
-3. Ponto de uso (git ops) passa a decifrar sob demanda; nunca reexpõe em resposta.
-4. Depois de migrado, dropar `repository_token`.
+**✅ Implementado no #110** — abordagem IN-PLACE (não a de coluna nova abaixo):
+o token é cifrado na **mesma coluna** `repository_token` com ciphertext versionado
+(`v1:<iv>:<ct>`, AES-GCM). Vantagem: **sem mudança de schema** → `schema.sql` e
+migrações intactos, sem drift entre criação por schema e banco migrado. Segredo
+`TOKEN_ENC_KEY`; migração do legado por `POST /projects/admin/encrypt-tokens`.
 
-**Arquivos.** `src/helpers/crypto.ts` (novo), `src/routes/projects.ts`, migração D1,
-`wrangler.toml` (binding do secret).
-
-**Risco.** Médio — migração de dados + rotação de secret. Mitigar: manter as duas
-colunas durante a transição, cutover só após verificar decifragem.
+Alternativa considerada (coluna nova, NÃO adotada): `repository_token_enc` +
+transição de duas colunas exigiria atualizar `schema.sql` junto da migração
+(criação por schema retém a definição antiga e diverge do banco migrado). A
+abordagem in-place evita isso.
 
 ---
 
@@ -45,14 +42,27 @@ colunas durante a transição, cutover só após verificar decifragem.
 **Causa.** `/evaluate` normaliza para `conforming|partial|non_conforming|pending`, mas
 não há garantia no banco; algum caminho aceitou caixa livre ("Conforme"/"conforme").
 
+**Atenção — o domínio real é MAIOR que quatro valores.** Antes de qualquer CHECK,
+inventariar TODOS os produtores e consumidores; um CHECK estreito quebra caminhos
+vivos:
+- **Produtores** que gravam fora dos quatro: `policies.ts` (~L219-220, L284-295) e
+  `projects.ts` (~L247-249) inserem `evaluation_status = 'conforme'`.
+- **Consumidores** de outros valores: `readiness.ts` (~L90-94) usa `rejected` — se
+  normalizado embora, some um achado de prontidão.
+
 **Correção.**
-1. **Repro** — obter a requisição exata que gravou valor fora do enum.
-2. Validação `zod` (enum) em **todos** os writes de `evaluation_status`.
-3. Migração: normalizar linhas existentes → adicionar `CHECK (evaluation_status IN (...))`.
+1. **Repro** + inventário completo (produtores/consumidores) → definir o **enum
+   canônico amplo** (inclui `conforme`/`rejected` ou os migra deliberadamente).
+2. Validação `zod` (enum) em **todos** os writes.
+3. Migração: normalizar linhas existentes → `CHECK (evaluation_status IN (...))`.
+   Atualizar o **`schema.sql` canônico** junto (senão criação por schema diverge do
+   banco migrado).
 
-**Arquivos.** `src/routes/evidence.ts`, `src/schemas.ts`, migração D1.
+**Arquivos.** `src/routes/evidence.ts`, `policies.ts`, `projects.ts`, `readiness.ts`,
+`src/schemas.ts`, migração D1 **e `schema.sql`**.
 
-**Risco.** Baixo — o CHECK falha se restar linha fora do enum; normalizar **antes** de aplicar.
+**Risco.** Médio — o CHECK falha se restar linha fora do enum; e um enum estreito
+quebra produtores/consumidores vivos. Inventariar **antes** de aplicar.
 
 ---
 
@@ -74,19 +84,19 @@ aterramento de tenant, volta status para `Draft`/`Review`, limpa carimbos
 
 ---
 
-## D4 — `GET /assessments` 403 p/ chave consultor · P3
+## D4 — `GET /assessments` 403 p/ chave consultor · **por design**
 
-**Causa.** Incerta. Hipótese: guard de isolamento sobre chave escopada em projeto
-acessando dado comercial cross-project.
+**Veredito (revisão de código, não é gap).** O 403 é determinístico e intencional:
+`resolveApiKeyUser` mapeia TODA chave de API para o papel `client`, e a rota de
+`assessments` passa requisições não-públicas por `somenteNess`, que protege
+registros comerciais **cross-tenant não escopados** (assessments não têm filtro por
+`project_id`). Relaxar o gate exporia a carteira inteira de assessments a uma chave
+escopada em projeto.
 
-**Correção.**
-1. **Repro** com a chave/headers exatos.
-2. Se isolamento intencional → mensagem clara + doc.
-3. Se gap → ajustar a policy/gate de papel.
+**Ação.** Documentar como **por design** (não é ajuste de gate). Se um consultor
+precisa de dado comercial, é por sessão de staff, não por chave escopada.
 
-**Arquivos.** rota de `assessments`, helpers de auth.
-
-**Risco.** Baixo. Bloqueia em repro.
+**Risco de "corrigir".** Alto — afrouxar aqui é vazamento cross-tenant.
 
 ---
 
