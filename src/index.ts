@@ -133,9 +133,24 @@ app.get('/.well-known/security.txt', (c) => {
   );
 });
 
-// 1. CORS
+// 1. CORS (S3 / OWASP A05). Era `origin: '*'` — o frontend é servido pelo próprio
+// Worker (mesma origem), então CORS só afeta chamadas de NAVEGADOR cross-origin;
+// clientes não-browser (MCP server, curl) ignoram CORS. Restringir aos domínios
+// conhecidos reduz superfície sem quebrar integração. Em dev, libera localhost.
+// A função ECOA a origem quando permitida (o Hono responde com essa origem exata,
+// não com `*`), e devolve '' (sem header) quando não.
+const CORS_ORIGENS = new Set([
+  'https://niso.ness.com.br',
+  'https://n-iso.ness.com.br',
+  'https://niso.ness.workers.dev',
+]);
 app.use('*', cors({
-  origin: '*',
+  origin: (origin, c) => {
+    if (!origin) return origin; // requisições same-origin/sem Origin (curl, server-to-server)
+    if (CORS_ORIGENS.has(origin)) return origin;
+    if (c.env.ENVIRONMENT !== 'production' && /^https?:\/\/localhost(:\d+)?$/.test(origin)) return origin;
+    return ''; // origem não permitida: sem Access-Control-Allow-Origin
+  },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Session-ID'],
 }));
