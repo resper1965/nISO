@@ -35,7 +35,9 @@ vendorsApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'vendors', id, c.get('user'));
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, createVendorSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
     const ts = calculateTrustScore(body);
     const dl = diligenceLevel(ts);
 
@@ -49,7 +51,6 @@ vendorsApp.put('/:id', async (c) => {
 
     return c.json({ ok: true, id, diligence_level: dl, trust_score: ts });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar vendor', e);
   }
 
@@ -62,7 +63,6 @@ vendorsApp.delete('/:id', async (c) => {
     await c.env.DB.prepare('DELETE FROM vendors WHERE id = ?').bind(id).run();
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir vendor', e);
   }
 });

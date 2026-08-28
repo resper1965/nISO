@@ -14,7 +14,9 @@ trainingApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'training_records', id, c.get('user'));
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, trainingSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
 
     await c.env.DB.prepare(
       `UPDATE training_records SET employee_name=?, training_name=?, completion_date=?, score=?, status=?, evidence_file=? WHERE id=?`
@@ -22,7 +24,6 @@ trainingApp.put('/:id', async (c) => {
 
     return c.json({ ok: true, id });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar treinamento', e);
   }
 
@@ -35,7 +36,6 @@ trainingApp.delete('/:id', async (c) => {
     await c.env.DB.prepare('DELETE FROM training_records WHERE id = ?').bind(id).run();
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir treinamento', e);
   }
 });

@@ -47,15 +47,15 @@ export default defineConfig({
       reporter: ['text-summary', 'html', 'json-summary', 'lcov'],
       reportsDirectory: 'coverage',
       // Piso de catraca fixado alguns pontos abaixo do atingido (2026-08:
-      // ~55.8% stmts / 43% br / 62.6% fn / 57.7% lines, após os testes de
-      // agents/ (assessment, evidence) e services/ RAG (memory, knowledge,
-      // embeddings, policy-generator)) para barrar REGRESSAO sem inventar meta.
-      // Subir junto conforme os testes crescem.
+      // ~61.1% stmts / 47.1% br / 67.4% fn / 63.4% lines, após os testes de
+      // isolamento de tenant nas rotas de projeto, de `ForbiddenError` e de
+      // validação dos writes que liam JSON cru) para barrar REGRESSAO sem
+      // inventar meta. Subir junto conforme os testes crescem.
       thresholds: {
-        statements: 53,
-        branches: 40,
-        functions: 59,
-        lines: 55,
+        statements: 58,
+        branches: 45,
+        functions: 65,
+        lines: 61,
       },
     },
   },

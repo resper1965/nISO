@@ -13,7 +13,9 @@ capaApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'corrective_actions', id, c.get('user'));
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, createCapaSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
     const completedAt = body.status === 'Closed' ? new Date().toISOString() : null;
     await c.env.DB.prepare(
       `UPDATE corrective_actions SET audit_id=?, risk_id=?, control_id=?, title=?, description=?, severity=?, assigned_to=?, due_date=?, status=?, resolution=?, completed_at=? WHERE id=?`
@@ -22,7 +24,6 @@ capaApp.put('/:id', async (c) => {
     await logAudit(c.env.DB, 'capa_updated', user?.email || 'system', `CAPA ${id} updated`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar CAPA', e);
   }
 });
@@ -36,7 +37,6 @@ capaApp.delete('/:id', async (c) => {
     await logAudit(c.env.DB, 'capa_deleted', user?.email || 'system', `CAPA ${id} deleted`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir CAPA', e);
   }
 });
