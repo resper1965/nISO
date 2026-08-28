@@ -91,7 +91,9 @@ risks.put('/api/v1/risks/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'risks', id, c.get('user'));
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, createRiskSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
     const impact = body.impact ?? 3;
     const probability = body.probability ?? 3;
     const level = riskLevel(impact * probability);

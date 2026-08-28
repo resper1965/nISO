@@ -65,7 +65,9 @@ projectCertificationsApp.post('/', async (c) => {
   try {
     const projectId = c.req.param('projectId');
     const user = c.get('user');
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, certificationSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
     const existing = await c.env.DB.prepare('SELECT id FROM certification_tracking WHERE project_id = ?').bind(projectId).first();
     if (existing) {
       await c.env.DB.prepare(

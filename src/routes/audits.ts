@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
 import { logAudit, requireResourceAccess, erro500 } from '../helpers';
+import { validateBody, auditScheduleSchema } from '../schemas';
 
 export const auditsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 export const projectAuditsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -12,7 +13,9 @@ auditsApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'audit_schedule', id, c.get('user'));
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, auditScheduleSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
     const completedAt = body.status === 'Completed' ? new Date().toISOString() : null;
     await c.env.DB.prepare(
       `UPDATE audit_schedule SET audit_type=?, title=?, scheduled_date=?, auditor_name=?, scope=?, status=?, findings_count=?, notes=?, completed_at=? WHERE id=?`
@@ -48,7 +51,9 @@ projectAuditsApp.get('/', async (c) => {
 projectAuditsApp.post('/', async (c) => {
   try {
     const projectId = c.req.param('projectId');
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, auditScheduleSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     await c.env.DB.prepare(

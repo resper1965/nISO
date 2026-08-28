@@ -14,7 +14,9 @@ trainingApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'training_records', id, c.get('user'));
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, trainingSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
 
     await c.env.DB.prepare(
       `UPDATE training_records SET employee_name=?, training_name=?, completion_date=?, score=?, status=?, evidence_file=? WHERE id=?`

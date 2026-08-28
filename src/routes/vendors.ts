@@ -35,7 +35,9 @@ vendorsApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'vendors', id, c.get('user'));
-    const body = await c.req.json<any>();
+    const valid = await validateBody(c, createVendorSchema);
+    if (!valid.success) return valid.response;
+    const body = valid.data as any;
     const ts = calculateTrustScore(body);
     const dl = diligenceLevel(ts);
 
