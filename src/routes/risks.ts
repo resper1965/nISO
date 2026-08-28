@@ -12,20 +12,20 @@ function riskLevel(score: number): string {
   return 'Critical';
 }
 
-risks.get('/api/v1/projects/:id/risks', async (c) => {
+risks.get('/api/v1/projects/:projectId/risks', async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT r.*, cc.standard as control_standard, cc.title as control_title 
      FROM risks r 
      LEFT JOIN compliance_controls cc ON r.control_id = cc.id 
      WHERE r.project_id = ? 
      ORDER BY r.impact * r.probability DESC`
-  ).bind(c.req.param('id')).all();
+  ).bind(c.req.param('projectId')).all();
   return c.json({ ok: true, risks: results });
 });
 
-risks.post('/api/v1/projects/:id/risks', async (c) => {
+risks.post('/api/v1/projects/:projectId/risks', async (c) => {
   try {
-    const projectId = c.req.param('id');
+    const projectId = c.req.param('projectId');
     const valid = await validateBody(c, createRiskSchema);
     if (!valid.success) return valid.response;
     const body = valid.data as any;
@@ -165,10 +165,10 @@ risks.delete('/api/v1/risks/:id', async (c) => {
   }
 });
 
-risks.get('/api/v1/projects/:id/risks/history', async (c) => {
+risks.get('/api/v1/projects/:projectId/risks/history', async (c) => {
   const { results } = await c.env.DB.prepare(
     'SELECT rh.*, r.asset, r.threat FROM risk_history rh JOIN risks r ON rh.risk_id = r.id WHERE rh.project_id = ? ORDER BY rh.assessment_date DESC'
-  ).bind(c.req.param('id')).all();
+  ).bind(c.req.param('projectId')).all();
   return c.json({ ok: true, history: results });
 });
 
