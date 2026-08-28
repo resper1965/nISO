@@ -22,7 +22,6 @@ trainingApp.put('/:id', async (c) => {
 
     return c.json({ ok: true, id });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar treinamento', e);
   }
 
@@ -35,7 +34,6 @@ trainingApp.delete('/:id', async (c) => {
     await c.env.DB.prepare('DELETE FROM training_records WHERE id = ?').bind(id).run();
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir treinamento', e);
   }
 });

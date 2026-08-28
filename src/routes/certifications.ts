@@ -30,7 +30,6 @@ certificationsApp.put('/:id', async (c) => {
     const updated = await c.env.DB.prepare('SELECT * FROM certification_tracking WHERE id = ?').bind(id).first();
     return c.json({ ok: true, certification: updated });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar certificação', e);
   }
 });
@@ -50,7 +49,6 @@ certificationsApp.delete('/:id', async (c) => {
     await c.env.DB.prepare('DELETE FROM certification_tracking WHERE id = ?').bind(id).run();
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao remover certificação', e);
   }
 });

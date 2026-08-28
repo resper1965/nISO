@@ -88,7 +88,6 @@ controlsApp.put('/:id', async (c) => {
     }
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar controle', e);
   }
 });
@@ -113,7 +112,6 @@ controlsApp.put('/:id/maturity', async (c) => {
     await logAudit(c.env.DB, 'control.maturity_updated', c.get('user')?.email || 'system', `Maturidade do controle ${id} atualizada para ${maturity}`, '', '', projRow?.project_id);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar maturidade', e);
   }
 });
@@ -136,7 +134,6 @@ controlsApp.put('/:id/status', async (c) => {
     await logAudit(c.env.DB, 'control.status_updated', c.get('user')?.email || 'system', `Status do controle ${id} atualizado para ${status}`, '', '', projRow?.project_id);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar status do controle', e);
   }
 });
@@ -190,7 +187,6 @@ const handleControlApprove = async (c: any) => {
     await logAudit(c.env.DB, 'control.approved', user.email, `Controle ${controlId} aprovado com assinatura por ${approvedBy} (IP: ${ip})`, '', '', targetProjectId);
     return c.json({ ok: true, approved_by: approvedBy, approved_at: now });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao assinar controle', e);
   }
 };
@@ -231,7 +227,6 @@ controlsApp.post('/:id/revoke-approval', async (c) => {
     await logAudit(c.env.DB, 'control.approval_revoked', ator, `Aprovação ${String(role).toUpperCase()} do controle ${id} revogada. Motivo: ${reason}`, reason, '', atual.project_id);
     return c.json({ ok: true, revoked: true, role });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao revogar aprovação', e);
   }
 });

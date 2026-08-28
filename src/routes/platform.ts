@@ -25,7 +25,6 @@ platformApp.put('/assets/:id', async (c) => {
     await logAudit(c.env.DB, 'asset.updated', user?.email || 'system', `Asset ${id} updated`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar ativo', e);
   }
 });
@@ -42,7 +41,6 @@ platformApp.delete('/assets/:id', async (c) => {
     await logAudit(c.env.DB, 'asset.deleted', user?.email || 'system', `Asset ${id} deleted`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao deletar ativo', e);
   }
 });
@@ -60,7 +58,6 @@ platformApp.put('/dpia/:id', async (c) => {
     await logAudit(c.env.DB, 'dpia_updated', user?.email || 'system', `DPIA ${id} updated`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar DPIA', e);
   }
 });

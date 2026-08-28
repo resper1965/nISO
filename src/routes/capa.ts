@@ -22,7 +22,6 @@ capaApp.put('/:id', async (c) => {
     await logAudit(c.env.DB, 'capa_updated', user?.email || 'system', `CAPA ${id} updated`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar CAPA', e);
   }
 });
@@ -36,7 +35,6 @@ capaApp.delete('/:id', async (c) => {
     await logAudit(c.env.DB, 'capa_deleted', user?.email || 'system', `CAPA ${id} deleted`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir CAPA', e);
   }
 });

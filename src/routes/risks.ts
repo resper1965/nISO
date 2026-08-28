@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { Bindings, Variables } from '../index';
-import { genId, logAudit, requireResourceAccess, erro500 } from '../helpers';
+import { genId, logAudit, requireResourceAccess, erro500, ForbiddenError } from '../helpers';
 import { validateBody, createRiskSchema } from '../schemas';
 
 const risks = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -80,7 +80,7 @@ risks.post('/api/v1/projects/:projectId/risks', async (c) => {
     await logAudit(c.env.DB, 'risk.created', c.get('user')?.email ?? 'system', `Risk ${id} created for project ${projectId}`);
     return c.json({ ok: true, id, risk_level: level }, 201);
   } catch (e: any) {
-    if (e.message?.includes('Forbidden')) {
+    if (e instanceof ForbiddenError) {
       return c.json({ ok: false, error: e.message }, 403);
     }
     return erro500(c, 'Falha ao criar risco', e);
@@ -146,7 +146,7 @@ risks.put('/api/v1/risks/:id', async (c) => {
 
     return c.json({ ok: true, id, risk_level: level });
   } catch (e: any) {
-    if (e.message?.includes('Forbidden')) {
+    if (e instanceof ForbiddenError) {
       return c.json({ ok: false, error: e.message }, 403);
     }
     return erro500(c, 'Falha ao atualizar risco', e);
@@ -160,7 +160,7 @@ risks.delete('/api/v1/risks/:id', async (c) => {
     await c.env.DB.prepare('DELETE FROM risks WHERE id = ?').bind(id).run();
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message?.startsWith('Forbidden')) return c.json({ ok: false, error: e.message }, 403);
+    if (e instanceof ForbiddenError) return c.json({ ok: false, error: e.message }, 403);
     return erro500(c, 'Falha ao excluir risco', e);
   }
 });

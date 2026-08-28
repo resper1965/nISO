@@ -21,7 +21,6 @@ auditsApp.put('/:id', async (c) => {
     await logAudit(c.env.DB, 'audit_updated', user?.email || 'system', `Audit ${id} updated`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar auditoria', e);
   }
 });
@@ -35,7 +34,6 @@ auditsApp.delete('/:id', async (c) => {
     await logAudit(c.env.DB, 'audit_deleted', user?.email || 'system', `Audit ${id} deleted`);
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir auditoria', e);
   }
 });

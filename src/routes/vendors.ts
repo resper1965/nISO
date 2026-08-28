@@ -49,7 +49,6 @@ vendorsApp.put('/:id', async (c) => {
 
     return c.json({ ok: true, id, diligence_level: dl, trust_score: ts });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar vendor', e);
   }
 
@@ -62,7 +61,6 @@ vendorsApp.delete('/:id', async (c) => {
     await c.env.DB.prepare('DELETE FROM vendors WHERE id = ?').bind(id).run();
     return c.json({ ok: true });
   } catch (e: any) {
-    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir vendor', e);
   }
 });
