@@ -32,7 +32,12 @@ describe('Contrato: todo write valida o corpo', () => {
           .split('\n')
           .map((linha, i) => [linha, i + 1] as const)
           .filter(([linha]) => linha.includes('c.req.json<any>()'))
-          .map(([, linha]) => `${caminho.replace('../', '')}:${linha}`)
+          // Ancorado: o glob devolve o caminho relativo a este arquivo
+          // (`../src/routes/x.ts`) e o que se quer no relatório é a raiz do
+          // repo. `replace('../', '')` sem âncora trocaria a primeira
+          // ocorrência ONDE QUER que ela esteja — inclusive no meio de um nome
+          // de diretório — e o CodeQL acusa isso com razão.
+          .map(([, linha]) => `${caminho.replace(/^\.\.\//, '')}:${linha}`)
       );
 
     expect(

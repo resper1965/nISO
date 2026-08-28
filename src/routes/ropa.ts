@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
-import { genId, logAudit, requireResourceAccess, verifyPassword, escapeHtml, autoridadeDeAssinatura, recusaDeAssinatura, ForbiddenError } from '../helpers';
+import { logAudit, requireResourceAccess, escapeHtml, autoridadeDeAssinatura, recusaDeAssinatura, ForbiddenError } from '../helpers';
 import { validateBody, ropaSchema, ropaApprovalSchema } from '../schemas';
 
 export const ropaApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
