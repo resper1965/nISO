@@ -146,6 +146,10 @@ export function traduzStatus(valor) {
 
 export function renderStatusBadge(arg1, arg2) {
     const knownTypes = ['success', 'warning', 'danger', 'info', 'neutral'];
+    // `neutral` é o default e vale quando nenhum argumento é um tipo conhecido —
+    // o último ramo não o reatribui de propósito. Reatribuir tornava este
+    // inicializador código morto (apontado pelo CodeQL) e dava a impressão de
+    // haver três decisões onde há duas.
     let type = 'neutral';
     let text = '';
 
@@ -156,7 +160,6 @@ export function renderStatusBadge(arg1, arg2) {
         type = arg2;
         text = arg1 || '';
     } else {
-        type = 'neutral';
         text = arg1 || arg2 || '';
     }
 
