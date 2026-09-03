@@ -108,7 +108,7 @@ fechou.
 
 | # | Ação | Critério de saída |
 |---|---|---|
-| 0.1 | Subir `hono` acima de 4.12.33 | `npm audit` sem o advisory GHSA-8j4g-w8fx-2239 |
+| 0.1 | ~~Subir `hono` acima de 4.12.33~~ **feito** | `npm audit` sem o advisory GHSA-8j4g-w8fx-2239 — hoje em 4.13.5, 0 vulnerabilidades |
 | 0.2 | Expor versão em `/health` (SHA do commit via var de build) | `curl /health` devolve `version`; a sonda de produção do `AGENTS.md` passa a distinguir versão sem heurística |
 | 0.3 | Retomar `CHANGELOG.md` e tag por release | tag `vX.Y.Z` na `main`, changelog cobrindo de 8.0.0 até hoje |
 
@@ -125,12 +125,21 @@ Segue a análise de testes já feita, na ordem de risco.
 | # | Ação | Critério de saída |
 |---|---|---|
 | 1.1 | Teste de **contrato** da guarda de recurso: varre `src/routes/*.ts`, lista todo handler `:id` fora de `/projects/:projectId/*`, falha se não houver guarda | teste novo falha ao remover a guarda de uma rota qualquer |
-| 1.2 | Estender `idor-tenant.test.ts` aos 9 recursos faltantes | cada recurso responde 403 ao tenant vizinho |
+| 1.2 | ~~Estender `idor-tenant.test.ts` aos 9 recursos faltantes~~ **feito** | cada recurso responde 403 ao tenant vizinho, com a linha conferida depois |
 | 1.3 | `platform.test.ts`: portfólio e os três dashboards de cliente | `platform.ts` acima de 70% |
 | 1.4 | Teste parametrizado dos 6 CRUDs de módulo (capa, audits, vendors, training, ropa, certifications) | os 6 acima de 70% |
 | 1.5 | Subir a catraca do backend | pisos em ~70/55/72/70, CI verde |
 
 Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
+
+> O item 1.2 encontrou defeito na primeira execução: `PUT`/`DELETE
+> /api/v1/assets/:id` chamavam a guarda FORA do `try`, e `DELETE
+> /api/v1/webhooks/:id` não tinha `try` algum — a negação de acesso escapava
+> para o `app.onError` e virava **500 em vez de 403**. O acesso continuava
+> negado, mas recusa de rotina contava como erro de servidor na taxa de 5xx do
+> eixo 4. Corrigido traduzindo o prefixo `Forbidden` no `app.onError`, o que
+> fecha a classe inteira. É o argumento do item 1.1 em forma concreta: a guarda
+> ser convenção manual não falha só por ausência — falha também por colocação.
 
 ### Onda 2 — Confiabilidade da mudança
 
