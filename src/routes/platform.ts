@@ -10,9 +10,14 @@ export const platformApp = new Hono<{ Bindings: Bindings; Variables: Variables }
 
 // Assets standalone CRUD
 platformApp.put('/assets/:id', async (c) => {
+  // A guarda fica DENTRO do try: o `catch` abaixo é quem traduz
+  // `Forbidden: ...` em 403. Fora dele, a negação de acesso escapava para o
+  // `app.onError` e o cliente recebia 500 — sem vazar dado, mas com o contrato
+  // errado e, pior, com recusa de rotina contando como erro de servidor no
+  // 5xx que a operação monitora.
   const id = c.req.param('id');
-  await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
   try {
+    await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
     const user = c.get('user');
     if (user && user.role === 'org_user') {
       return c.json({ error: 'Forbidden: Cannot edit asset' }, 403);
@@ -31,9 +36,10 @@ platformApp.put('/assets/:id', async (c) => {
 });
 
 platformApp.delete('/assets/:id', async (c) => {
+  // Mesma correção do PUT acima: a guarda tem de estar dentro do try.
   const id = c.req.param('id');
-  await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
   try {
+    await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
     const user = c.get('user');
     if (user && user.role === 'org_user') {
       return c.json({ error: 'Forbidden: Cannot delete asset' }, 403);
