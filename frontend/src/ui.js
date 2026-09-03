@@ -92,6 +92,58 @@ export function renderStatCards(statsArray) {
     return `<div class="stat-strip" style="display:flex; gap:1rem; margin-bottom:1.5rem; flex-wrap:wrap;">${cardsHtml}</div>`;
 }
 
+/**
+ * Vocabulário de status/severidade: o banco guarda em inglês, a interface é
+ * PT-BR (decisão registrada no AGENTS.md).
+ *
+ * Vive fora do `renderStatusBadge` porque nem toda tela usa badge — a lista de
+ * riscos e a de controles pintam o valor com estilo próprio e, por não passarem
+ * por aqui, mostravam "High", "Medium", "Completed" e "In Progress" crus ao
+ * usuário. Uma tabela só, para as duas formas de exibir não divergirem.
+ */
+const STATUS_DICT = {
+    'implemented': 'Implementado',
+    'not applicable': 'Não Aplicável',
+    'approved': 'Aprovado',
+    'compliant': 'Conforme',
+    'missing': 'Pendente',
+    'partial': 'Parcial',
+    'draft': 'Rascunho',
+    'under review': 'Em Revisão',
+    'active': 'Ativo',
+    'pending': 'Pendente',
+    'open': 'Aberto',
+    'closed': 'Fechado',
+    'low': 'Baixo',
+    'medium': 'Médio',
+    'high': 'Alto',
+    'critical': 'Crítico',
+    'planned': 'Planejado',
+    'completed': 'Concluído',
+    'in_progress': 'Em Andamento',
+    'in progress': 'Em Andamento',
+    // Faltavam: são valores que o backend grava e que apareciam em inglês.
+    'treated': 'Tratado',
+    'mitigate': 'Mitigar',
+    'accept': 'Aceitar',
+    'transfer': 'Transferir',
+    'avoid': 'Evitar',
+    'scheduled': 'Agendado',
+    'very low': 'Muito Baixo',
+    'rejected': 'Rejeitado',
+    'revoked': 'Revogado'
+};
+
+/**
+ * Traduz um valor de status/severidade para PT-BR. Valor desconhecido volta
+ * COMO VEIO — melhor mostrar o termo cru do banco do que apagar a informação.
+ */
+export function traduzStatus(valor) {
+    if (valor === null || valor === undefined || valor === '') return '';
+    const chave = valor.toString().toLowerCase().trim();
+    return STATUS_DICT[chave] || valor;
+}
+
 export function renderStatusBadge(arg1, arg2) {
     const knownTypes = ['success', 'warning', 'danger', 'info', 'neutral'];
     let type = 'neutral';
@@ -108,33 +160,7 @@ export function renderStatusBadge(arg1, arg2) {
         text = arg1 || arg2 || '';
     }
 
-    const STATUS_DICT = {
-        'implemented': 'Implementado',
-        'not applicable': 'Não Aplicável',
-        'approved': 'Aprovado',
-        'compliant': 'Conforme',
-        'missing': 'Pendente',
-        'partial': 'Parcial',
-        'draft': 'Rascunho',
-        'under review': 'Em Revisão',
-        'active': 'Ativo',
-        'pending': 'Pendente',
-        'open': 'Aberto',
-        'closed': 'Fechado',
-        'low': 'Baixo',
-        'medium': 'Médio',
-        'high': 'Alto',
-        'critical': 'Crítico',
-        'planned': 'Planejado',
-        'completed': 'Concluído',
-        'in_progress': 'Em Andamento',
-        'in progress': 'Em Andamento'
-    };
-
-    const lowerText = text.toString().toLowerCase().trim();
-    if (STATUS_DICT[lowerText]) {
-        text = STATUS_DICT[lowerText];
-    }
+    text = traduzStatus(text);
 
     const styles = {
         success: 'background:rgba(52,199,89,0.12); color:#34c759; border:1px solid rgba(52,199,89,0.3);',
@@ -203,4 +229,5 @@ window.showToast = showToast;
 window.renderPageHeader = renderPageHeader;
 window.renderStatCards = renderStatCards;
 window.renderStatusBadge = renderStatusBadge;
-window.renderDataTable = renderDataTable;
+window.traduzStatus = traduzStatus;
+window.renderDataTable = renderDataTable;
