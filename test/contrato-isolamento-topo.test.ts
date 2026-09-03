@@ -75,16 +75,21 @@ function rotasDeTopo(): Rota[] {
     mount[m[2]] = m[1];
   }
 
-  // De qual arquivo veio cada router (nomeado ou default).
-  const arquivoDe: Record<string, string> = {};
+  // De qual arquivo veio cada router (nomeado ou default). Guardamos os DOIS
+  // caminhos derivados do mesmo nome de módulo: a chave do glob (que é relativa
+  // a este arquivo) e o caminho do repositório (que vai na mensagem de falha).
+  // Derivar um do outro por `replace('../', '')` recortaria só a primeira
+  // ocorrência e é frágil à toa — o nome do módulo já está em mãos aqui.
+  const arquivoDe: Record<string, { chave: string; origem: string }> = {};
   for (const m of indexSrc.matchAll(/import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+'\.\/routes\/([\w-]+)'/g)) {
-    const chave = `../src/routes/${m[3]}.ts`;
-    if (m[1]) for (const v of m[1].split(',')) arquivoDe[v.trim()] = chave;
-    else arquivoDe[m[2]] = chave;
+    const modulo = m[3];
+    const par = { chave: `../src/routes/${modulo}.ts`, origem: `src/routes/${modulo}.ts` };
+    if (m[1]) for (const v of m[1].split(',')) arquivoDe[v.trim()] = par;
+    else arquivoDe[m[2]] = par;
   }
 
   const rotas: Rota[] = [];
-  for (const [routerVar, chave] of Object.entries(arquivoDe)) {
+  for (const [routerVar, { chave, origem }] of Object.entries(arquivoDe)) {
     if (!(routerVar in mount)) continue; // importado mas não montado
     const src = arquivos[chave];
     if (!src) continue;
@@ -97,7 +102,7 @@ function rotasDeTopo(): Rota[] {
       rotas.push({
         metodo: m[2].toUpperCase(),
         caminho,
-        origem: `${chave.replace('../', '')}:${i + 1}`,
+        origem: `${origem}:${i + 1}`,
       });
     });
   }
