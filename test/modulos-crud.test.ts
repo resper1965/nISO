@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import worker from '../src/index';
 import { hashPassword } from '../src/helpers';
-import { applySchema, sessionFor } from './helpers/d1';
+import { applySchema, sessionFor, pedir } from './helpers/d1';
 
 /**
  * CRUD dos módulos de projeto — capa, audits, vendors, training, ropa e
@@ -80,12 +80,8 @@ const MODULOS: Modulo[] = [
   },
 ];
 
-function testEnv() {
-  return { ...env, AI: { run: async () => ({ response: 'stub' }) } } as any;
-}
-async function req(path: string, init: RequestInit = {}) {
-  return worker.fetch(new Request(`http://localhost${path}`, init), testEnv());
-}
+/** Atalho local: o `env` com stub de IA e a montagem vivem em `helpers/d1.ts`. */
+const req = (caminho: string, init: RequestInit = {}) => pedir(worker, caminho, init);
 
 describe('CRUD dos módulos de projeto', () => {
   let headers: Record<string, string>;
@@ -163,11 +159,32 @@ describe('CRUD dos módulos de projeto', () => {
    * carregam regra de negócio de verdade: o resumo calcula o percentual que
    * decide conformidade (A.6.3 — conscientização), e a importação em lote grava
    * N registros de uma vez.
+   *
+   * Este bloco usa um projeto PRÓPRIO (`proj-t`). A versão anterior somava sobre
+   * o projeto A e só chegava a `total = 5` porque o DELETE do bloco de CRUD
+   * acima havia rodado antes — uma falha lá produzia falhas em cascata aqui,
+   * apontando para o lugar errado. Contagem não deve depender da ordem dos
+   * `it()` de outro describe.
    */
   describe('training: resumo e importação em lote', () => {
+    const T = 'proj-t';
+    let headersT: Record<string, string>;
+    let jsonT: Record<string, string>;
+
+    beforeAll(async () => {
+      const senha = await hashPassword('password123');
+      await env.DB.batch([
+        env.DB.prepare(`INSERT INTO projects (id, client_name, standards, org_role, status) VALUES (?,?,?,?,?)`)
+          .bind(T, 'Cliente T', 'ISO 27001', 'controller', 'Active'),
+        env.DB.prepare(`INSERT INTO users (id, email, password_hash, name, role, client_project_id) VALUES (?,?,?,?,?,?)`)
+          .bind('u-adm-t', 'adm@t.com', senha, 'Admin do T', 'org_admin', T),
+      ]);
+      headersT = await sessionFor({ id: 'u-adm-t', email: 'adm@t.com', role: 'org_admin', client_project_id: T });
+      jsonT = { ...headersT, 'Content-Type': 'application/json' };
+    });
     it('importa em lote com o project_id do caminho', async () => {
-      const res = await req(`/api/v1/projects/${A}/training/import-external`, {
-        method: 'POST', headers: json,
+      const res = await req(`/api/v1/projects/${T}/training/import-external`, {
+        method: 'POST', headers: jsonT,
         body: JSON.stringify({
           records: [
             { employee_name: 'Um', training_name: 'LGPD', status: 'Completed' },
@@ -183,13 +200,13 @@ describe('CRUD dos módulos de projeto', () => {
 
       const { results } = await env.DB.prepare(
         'SELECT project_id FROM training_records WHERE project_id = ?'
-      ).bind(A).all();
+      ).bind(T).all();
       expect(results).toHaveLength(5);
     });
 
     it('lote vazio é 400, não 201 com zero registros', async () => {
-      const res = await req(`/api/v1/projects/${A}/training/import-external`, {
-        method: 'POST', headers: json, body: JSON.stringify({ records: [] }),
+      const res = await req(`/api/v1/projects/${T}/training/import-external`, {
+        method: 'POST', headers: jsonT, body: JSON.stringify({ records: [] }),
       });
       expect(res.status).toBe(400);
     });
@@ -197,7 +214,7 @@ describe('CRUD dos módulos de projeto', () => {
     it('resume a cobertura e o veredito de conformidade', async () => {
       // 4 de 5 concluídos = 80%, que é exatamente o limiar. O caso de borda é
       // o que importa: `>= 80` e `> 80` dão vereditos opostos aqui.
-      const res = await req(`/api/v1/projects/${A}/training/summary`, { headers });
+      const res = await req(`/api/v1/projects/${T}/training/summary`, { headers: headersT });
       expect(res.status, await res.clone().text()).toBe(200);
       const resumo = await res.json() as any;
       expect(resumo.total).toBe(5);
@@ -208,6 +225,7 @@ describe('CRUD dos módulos de projeto', () => {
     });
 
     it('projeto sem registro nenhum não divide por zero', async () => {
+      // O projeto B nunca recebeu registro de treinamento neste arquivo.
       const res = await req(`/api/v1/projects/${B}/training/summary`, {
         headers: await sessionFor({ id: 'u-staff-t', email: 'staff@ness.io', role: 'platform_admin' }),
       });

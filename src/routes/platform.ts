@@ -10,11 +10,13 @@ export const platformApp = new Hono<{ Bindings: Bindings; Variables: Variables }
 
 // Assets standalone CRUD
 platformApp.put('/assets/:id', async (c) => {
-  // A guarda fica DENTRO do try: o `catch` abaixo é quem traduz
-  // `Forbidden: ...` em 403. Fora dele, a negação de acesso escapava para o
-  // `app.onError` e o cliente recebia 500 — sem vazar dado, mas com o contrato
-  // errado e, pior, com recusa de rotina contando como erro de servidor no
-  // 5xx que a operação monitora.
+  // A guarda fica DENTRO do try, como em todo o resto do repositório: o `catch`
+  // abaixo é o caminho PRIMÁRIO de tradução de `Forbidden: ...` em 403, e o
+  // ramo equivalente no `app.onError` é a rede — existe para o handler que
+  // esquecer o try, não para substituir este. Fora do try, a recusa escapava e
+  // virava 500: sem vazar dado, mas com o contrato errado e com recusa de
+  // rotina contando como erro de servidor na taxa de 5xx que a operação
+  // monitora.
   const id = c.req.param('id');
   try {
     await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
@@ -36,7 +38,8 @@ platformApp.put('/assets/:id', async (c) => {
 });
 
 platformApp.delete('/assets/:id', async (c) => {
-  // Mesma correção do PUT acima: a guarda tem de estar dentro do try.
+  // Mesma correção do PUT acima: a guarda tem de estar dentro do try, que é
+  // quem traduz a recusa em 403.
   const id = c.req.param('id');
   try {
     await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
@@ -221,23 +224,26 @@ platformApp.get('/dashboard/stats', async (c) => {
 
     // Mesma inversão do `/portfolio` acima, pelos mesmos dois motivos: só a
     // equipe ness. conta a plataforma inteira; qualquer outro papel — inclusive
-    // um fora da lista conhecida, e inclusive sem projeto — é escopado. O
-    // escopo VAZIO é o ponto: `WHERE id = ''` não casa com nada, então conta
-    // zero em vez de contar tudo.
-    const filtrar = !ehEquipeNess(user);
-    const escopo = filtrar ? (user?.client_project_id ?? '') : null;
+    // um fora da lista conhecida, e inclusive sem projeto — é escopado.
+    //
+    // UMA variável decide tudo: `null` é o ramo da ness. (sem WHERE), string é
+    // o escopo do cliente. A string pode ser VAZIA, e é esse o ponto —
+    // `WHERE id = ''` não casa com nada, então cliente sem projeto conta zero
+    // em vez de contar a plataforma inteira.
+    const escopo: string | null = ehEquipeNess(user) ? null : (user?.client_project_id ?? '');
 
-    const whereResource = filtrar ? 'WHERE project_id = ?' : '';
-    const whereProject = filtrar ? 'WHERE id = ?' : '';
-    const params = filtrar ? [escopo] : [];
+    const whereResource = escopo === null ? '' : 'WHERE project_id = ?';
+    const whereProject = escopo === null ? '' : 'WHERE id = ?';
+    const params = escopo === null ? [] : [escopo];
 
-    const stats: any = await c.env.DB.batch([
+    const stats = await c.env.DB.batch<{ count: number }>([
       // O funil comercial é da ness. (ver `somenteNess` em helpers.ts): cliente
       // não vê lead — nem o conteúdo, nem quantos existem. A contagem era
-      // global para todo mundo.
-      filtrar
-        ? c.env.DB.prepare('SELECT 0 as count')
-        : c.env.DB.prepare('SELECT count(*) as count FROM leads'),
+      // global para todo mundo. O `SELECT 0` mantém o alinhamento posicional do
+      // batch, para os índices abaixo não dependerem do papel de quem pergunta.
+      escopo === null
+        ? c.env.DB.prepare('SELECT count(*) as count FROM leads')
+        : c.env.DB.prepare('SELECT 0 as count'),
       c.env.DB.prepare(`SELECT count(*) as count FROM projects ${whereProject}`).bind(...params),
       c.env.DB.prepare(`SELECT count(*) as count FROM compliance_controls ${whereResource} ${whereResource ? "AND" : "WHERE"} status = 'Completed'`).bind(...params),
       c.env.DB.prepare(`SELECT count(*) as count FROM evidence ${whereResource} ${whereResource ? "AND" : "WHERE"} evaluation_status = 'pending'`).bind(...params),

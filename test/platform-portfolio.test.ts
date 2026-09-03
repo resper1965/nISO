@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import worker from '../src/index';
 import { hashPassword } from '../src/helpers';
-import { applySchema, sessionFor } from './helpers/d1';
+import { applySchema, sessionFor, pedir } from './helpers/d1';
 
 /**
  * Portfólio e portal do cliente (`src/routes/platform.ts`).
@@ -23,12 +23,8 @@ import { applySchema, sessionFor } from './helpers/d1';
 const A = 'proj-a';
 const B = 'proj-b';
 
-function testEnv() {
-  return { ...env, AI: { run: async () => ({ response: 'stub' }) } } as any;
-}
-async function req(path: string, init: RequestInit = {}) {
-  return worker.fetch(new Request(`http://localhost${path}`, init), testEnv());
-}
+/** Atalho local: o `env` com stub de IA e a montagem vivem em `helpers/d1.ts`. */
+const req = (caminho: string, init: RequestInit = {}) => pedir(worker, caminho, init);
 
 describe('Portfólio e portal do cliente', () => {
   let admA: Record<string, string>;

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import worker from '../src/index';
 import { hashPassword } from '../src/helpers';
-import { applySchema, sessionFor } from './helpers/d1';
+import { applySchema, sessionFor, pedir } from './helpers/d1';
 import indexSrc from '../src/index.ts?raw';
 
 /**
@@ -166,15 +166,14 @@ describe('Contrato de isolamento das rotas de topo', () => {
 
   it('id inexistente nunca responde sucesso nem erro de servidor', async () => {
     const rotas = rotasDeTopo().filter(r => !(`${r.metodo} ${r.caminho}` in EXCECOES));
-    const testEnv = { ...env, AI: { run: async () => ({ response: 'stub' }) } } as any;
     const falhas: string[] = [];
 
     for (const r of rotas) {
-      const res = await worker.fetch(new Request(`http://localhost${forjarCaminho(r.caminho)}`, {
+      const res = await pedir(worker, forjarCaminho(r.caminho), {
         method: r.metodo,
         headers,
         body: r.metodo === 'GET' ? undefined : '{}',
-      }), testEnv);
+      });
 
       // 4xx é o resultado esperado, qualquer que seja: 403 (guarda de tenant ou
       // de papel), 404 (não existe), 400 (corpo vazio recusado). O que não pode
