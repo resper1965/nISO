@@ -7,8 +7,8 @@ import { applySchema, sessionFor } from './helpers/d1';
 /**
  * Portfólio e portal do cliente (`src/routes/platform.ts`).
  *
- * São os endpoints que decidem O QUE CADA CLIENTE VÊ, e eram os menos cobertos
- * do backend (40% em 2026-09). O filtro deles não vem de middleware: cada
+ * São os endpoints que decidem O QUE CADA CLIENTE VÊ, e estavam entre os menos
+ * cobertos do backend (26,1% na `main`). O filtro deles não vem de middleware: cada
  * handler compara `user.client_project_id` por conta própria, o que os torna
  * exatamente o tipo de código que precisa de teste e não tinha.
  *
