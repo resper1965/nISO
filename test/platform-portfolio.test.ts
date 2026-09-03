@@ -35,6 +35,7 @@ describe('Portfólio e portal do cliente', () => {
   let staff: Record<string, string>;
   let orfao: Record<string, string>;
   let comLead: Record<string, string>;
+  let cisoA: Record<string, string>;
 
   beforeAll(async () => {
     await applySchema();
@@ -53,6 +54,11 @@ describe('Portfólio e portal do cliente', () => {
       // Papel de cliente SEM projeto — criável hoje pela rota de usuários.
       env.DB.prepare(`INSERT INTO users (id, email, password_hash, name, role, client_project_id) VALUES (?,?,?,?,?,?)`)
         .bind('u-orfao', 'orfao@x.com', senha, 'Cliente sem projeto', 'org_admin', null),
+      // Papel FORA da lista conhecida de papéis-cliente, escopado a um projeto.
+      // `users.role` é TEXT livre e `createUserSchema.role` é `z.string()`: este
+      // papel é criável hoje, e a própria suíte de IDOR já o usa.
+      env.DB.prepare(`INSERT INTO users (id, email, password_hash, name, role, client_project_id) VALUES (?,?,?,?,?,?)`)
+        .bind('u-ciso-a', 'ciso@a.com', senha, 'CISO do A', 'ciso', A),
 
       env.DB.prepare(`INSERT INTO project_phases (id, project_id, phase_number, title, status) VALUES (?,?,?,?,?)`)
         .bind('ph-1', A, 1, 'Fase 1', 'completed'),
@@ -77,6 +83,7 @@ describe('Portfólio e portal do cliente', () => {
     staff = await sessionFor({ id: 'u-staff', email: 'staff@ness.io', role: 'platform_admin' });
     orfao = await sessionFor({ id: 'u-orfao', email: 'orfao@x.com', role: 'org_admin', client_project_id: null });
     comLead = await sessionFor({ id: 'u-lead', email: 'lead@x.com', role: 'client' });
+    cisoA = await sessionFor({ id: 'u-ciso-a', email: 'ciso@a.com', role: 'ciso', client_project_id: A });
   });
 
   describe('GET /portfolio', () => {
@@ -92,6 +99,19 @@ describe('Portfólio e portal do cliente', () => {
       expect(res.status).toBe(200);
       const { portfolio } = await res.json() as any;
       expect(portfolio.map((p: any) => p.id).sort()).toEqual([A, B]);
+    });
+
+    it('papel FORA da lista de papéis-cliente é escopado, não promovido a plataforma', async () => {
+      // A decisão de ver tudo é por allowlist de STAFF, não por allowlist de
+      // papel-cliente: lista de cliente nunca é exaustiva com `role` livre.
+      // Antes desta inversão, `ciso` do projeto A recebia a carteira inteira.
+      const res = await req('/api/v1/portfolio', { headers: cisoA });
+      expect(res.status).toBe(200);
+      const { portfolio } = await res.json() as any;
+      expect(portfolio.map((p: any) => p.id), 'papel desconhecido virou visão de plataforma').toEqual([A]);
+
+      const stats = await req('/api/v1/dashboard/stats', { headers: cisoA });
+      expect((await stats.json() as any).projects).toBe(1);
     });
 
     it('papel de cliente SEM projeto não vê nada (falha fechado, não aberto)', async () => {

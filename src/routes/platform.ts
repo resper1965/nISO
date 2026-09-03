@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
-import { logAudit, requireResourceAccess, escapeHtml, erro500, registraErro, autoridadeDeAssinatura, recusaDeAssinatura } from '../helpers';
+import { logAudit, requireResourceAccess, escapeHtml, erro500, registraErro, autoridadeDeAssinatura, recusaDeAssinatura, ehEquipeNess } from '../helpers';
 import { PHASE_TITLES, PHASE_CHECKLISTS } from '../constants';
 import { DEFAULT_FINANCIAL_MODEL } from '../services/pricing';
 
@@ -218,14 +218,14 @@ platformApp.get('/dashboard', async (c) => {
 platformApp.get('/dashboard/stats', async (c) => {
   try {
     const user = c.get('user');
-    const isClient = !!user && (user.role === 'org_admin' || user.role === 'org_user' || user.role === 'client');
 
-    // `escopo === null` é o ramo de plataforma. Para papel de cliente o escopo
-    // é sempre string — inclusive VAZIA, e é essa a correção: antes o filtro
-    // era `projectId ? ...`, então cliente sem projeto caía no ramo sem WHERE e
-    // recebia a contagem da plataforma inteira. Com `''`, nada casa.
-    const escopo: string | null = isClient ? (user.client_project_id ?? '') : null;
-    const filtrar = escopo !== null;
+    // Mesma inversão do `/portfolio` acima, pelos mesmos dois motivos: só a
+    // equipe ness. conta a plataforma inteira; qualquer outro papel — inclusive
+    // um fora da lista conhecida, e inclusive sem projeto — é escopado. O
+    // escopo VAZIO é o ponto: `WHERE id = ''` não casa com nada, então conta
+    // zero em vez de contar tudo.
+    const filtrar = !ehEquipeNess(user);
+    const escopo = filtrar ? (user?.client_project_id ?? '') : null;
 
     const whereResource = filtrar ? 'WHERE project_id = ?' : '';
     const whereProject = filtrar ? 'WHERE id = ?' : '';
@@ -343,19 +343,22 @@ platformApp.put('/notifications/:id/read', async (c) => {
 platformApp.get('/portfolio', async (c) => {
   try {
     const user = c.get('user');
-    // O filtro depende do PAPEL, não de o escopo estar preenchido. Antes a
-    // condição exigia `&& user.client_project_id`: um papel de cliente sem
-    // projeto caía no ramo de plataforma e recebia a carteira de TODOS os
-    // tenants. E essa conta é criável hoje — `createUserSchema` declara
-    // `client_project_id` como `.nullable().optional()`.
+    // Duas coisas erravam aqui, e as duas na mesma direção — abrindo:
     //
-    // Com o escopo vazio, o `WHERE id = ''` não casa com nada: escopo ausente
-    // significa NADA, nunca TUDO. É a mesma postura que `middleware/auth.ts`
-    // já aplica à chave de API sem projeto.
-    let stmt = c.env.DB.prepare('SELECT * FROM projects ORDER BY created_at DESC');
-    if (user && (user.role === 'org_admin' || user.role === 'org_user' || user.role === 'client')) {
-      stmt = c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(user.client_project_id ?? '');
-    }
+    // 1. a condição exigia `&& user.client_project_id`, então papel de cliente
+    //    SEM projeto caía no ramo de plataforma (conta criável hoje:
+    //    `createUserSchema` declara o campo `.nullable().optional()`);
+    // 2. o ramo escopado era escolhido por allowlist de papel-CLIENTE, e
+    //    `users.role` é TEXT livre — um papel fora da lista, como `ciso`
+    //    (que a própria suíte usa), enxergava a carteira de TODOS os tenants.
+    //
+    // Agora quem decide é `ehEquipeNess`: só a equipe ness. vê a plataforma
+    // inteira, e todo o resto é escopado ao próprio projeto. Papel desconhecido
+    // cai no lado seguro. Com o escopo vazio, `WHERE id = ''` não casa com
+    // nada — escopo ausente significa NADA, nunca TUDO.
+    const stmt = ehEquipeNess(user)
+      ? c.env.DB.prepare('SELECT * FROM projects ORDER BY created_at DESC')
+      : c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(user?.client_project_id ?? '');
     const { results } = await stmt.all();
     return c.json({ ok: true, portfolio: results || [], projects: results || [] });
   } catch (e: any) {

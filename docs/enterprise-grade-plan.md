@@ -124,11 +124,12 @@ Segue a análise de testes já feita, na ordem de risco.
 
 | # | Ação | Critério de saída |
 |---|---|---|
-| 1.1 | ~~Teste de **contrato** da guarda de recurso~~ **feito** | `test/contrato-isolamento-topo.test.ts`: descobre as 77 rotas lendo o fonte e dispara cada uma com id forjado. Comprovado por mutação — revertida a correção do `onError`, ele acusa as 2 rotas, com arquivo e linha |
-| 1.2 | ~~Estender `idor-tenant.test.ts` aos 9 recursos faltantes~~ **feito** | cada recurso responde 403 ao tenant vizinho, com a linha conferida depois |
-| 1.3 | ~~Portfólio e dashboards de cliente~~ **feito** | `platform.ts` de 40% para **71,8%** |
+| 1.1 | Teste de contrato da guarda de recurso — **PARCIAL** | Entregue: `test/contrato-isolamento-topo.test.ts` descobre as 77 rotas lendo o fonte e prova que nenhuma responde 2xx ou 5xx a id forjado (achou os dois 500 de webhooks). **Não** cumpre o critério original: por mutação, removida a guarda de um handler de `evidence.ts`, o teste seguiu VERDE — rota sem guarda devolve 404 para id inexistente, e 404 passa. Falta o 1.6 |
+| 1.2 | ~~Estender `idor-tenant.test.ts` aos 9 recursos faltantes~~ **feito** | 8 dos 9 respondem 403 ao tenant vizinho, com a linha conferida depois. O 9º (`notifications/:id/read`) responde **200** por desenho — o escopo dela é o dono, não o projeto — e ali a asserção é sobre a linha, não sobre o status |
+| 1.3 | ~~Portfólio e dashboards de cliente~~ **feito** | `platform.ts` de **26,1%** (medido na `main`) para **71,8%**. O "40%" citado numa versão anterior deste documento era a medição intermediária, depois do commit do item 1.2 — não a linha de base |
 | 1.4 | ~~Teste parametrizado dos 6 CRUDs de módulo~~ **feito** | os 6 acima de 70%: audits 92,7 · capa 90,9 · training 90,2 · certifications 82,8 · vendors 76,5 · ropa 76,4 |
-| 1.5 | ~~Subir a catraca do backend~~ **feito** | pisos em 62/50/69/64, abaixo do atingido (65,5 / 54,1 / 72,4 / 68,0); 58 arquivos e 530 testes verdes |
+| 1.5 | Subir a catraca do backend — **PARCIAL** | Alvo original: ~70/55/72/70. Atingido: 65,5 / 54,1 / 72,4 / 68,0 — passa em `functions`, falha nas outras três. Pisos hoje em 62/50/69/64, abaixo do atingido, como degrau; o alvo permanece ~70/55/72/70 |
+| 1.6 | **NOVO** — semear recurso real do outro tenant por rota, para o contrato do 1.1 detectar guarda AUSENTE (e não só mal colocada) | remover `requireResourceAccess` de qualquer handler faz o teste falhar |
 
 Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
 
@@ -149,6 +150,15 @@ Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
 > `.nullable().optional()` e `role` é `z.string()` livre). Corrigido para falhar
 > fechado — escopo ausente significa nada, nunca tudo —, junto com a contagem de
 > leads, que era global para todo cliente apesar do `somenteNess`.
+
+> O code-review encontrou que essa primeira correção fechava só METADE do
+> buraco: ela mantinha a decisão por allowlist de papel-CLIENTE
+> (`org_admin|org_user|client`), e `users.role` é TEXT livre. Sonda: papel
+> `ciso` escopado ao projeto A — papel que a própria suíte de IDOR usa —
+> recebia `["proj-a","proj-b"]` do `/portfolio` e `projects: 2` do
+> `/dashboard/stats`. Corrigido invertendo a decisão para allowlist de STAFF
+> (`ehEquipeNess`, o mesmo conjunto que `requireResourceAccess` já usa): papel
+> desconhecido cai no ramo escopado, que é o lado seguro de errar.
 
 ### Achados da onda 1 ainda em aberto
 

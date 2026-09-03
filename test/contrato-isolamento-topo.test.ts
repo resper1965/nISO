@@ -21,11 +21,24 @@ import indexSrc from '../src/index.ts?raw';
  * falha só por ausência; falha também por colocação. Só a resposta real
  * distingue as duas coisas.
  *
- * O que se afirma aqui: para um usuário escopado ao projeto A, uma rota de topo
- * com id INEXISTENTE nunca responde sucesso nem erro de servidor. Vale como
- * teste porque `requireResourceAccess` é fail-closed — id que não existe e id de
- * outro tenant tomam exatamente o mesmo caminho (`!row || row.project_id !==
- * ...`), então não é preciso semear recurso alheio para exercitar a guarda.
+ * O QUE ESTE TESTE AFIRMA — e o que ele NÃO afirma.
+ *
+ * Afirma: (1) as rotas de topo são DESCOBERTAS do fonte, então uma rota nova não
+ * escapa por esquecimento; (2) nenhuma delas responde sucesso ou erro de
+ * servidor a um id inexistente vindo de um usuário escopado a outro projeto.
+ *
+ * NÃO afirma que existe guarda. Foi verificado por mutação: removida a chamada
+ * de `requireResourceAccess` de um handler de `evidence.ts`, este teste
+ * continuou VERDE — porque a rota sem guarda responde 404 para id inexistente, e
+ * 404 satisfaz a asserção. A guarda só é detectada quando sua ausência produz
+ * 2xx ou 5xx, que foi o caso dos dois handlers de webhooks (500).
+ *
+ * Detectar a ausência em geral exige semear um recurso REAL do outro tenant por
+ * rota — aí a rota sem guarda devolve 200 com dado alheio, que é inconfundível.
+ * É o que `idor-tenant.test.ts` faz à mão, recurso a recurso. Fechar essa lacuna
+ * de forma automática está registrado no plano; até lá, este arquivo é rede de
+ * descoberta e detector de 5xx, não prova de guarda — e dizer o contrário seria
+ * exatamente o tipo de afirmação sem evidência que o `AGENTS.md` proíbe.
  *
  * Rotas sob `/api/v1/projects/:projectId/*` ficam de fora: ali quem responde é
  * o `projectAccessMiddleware`, e há teste próprio.

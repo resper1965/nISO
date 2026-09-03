@@ -302,8 +302,11 @@ app.onError((err, c) => {
   // e o cliente recebia 500: contrato errado e, pior, recusa de rotina contando
   // como erro de servidor na taxa de 5xx que a operação monitora. Traduzir aqui
   // fecha a classe inteira, inclusive para o handler que ainda não existe. O
-  // prefixo é string nossa, das duas guardas — nunca vem do usuário.
-  if (err instanceof Error && err.message.startsWith('Forbidden')) {
+  // prefixo `Forbidden:` (COM os dois-pontos) é string nossa, produzida só
+  // pelas duas guardas em helpers.ts — nunca vem do usuário. Casar `Forbidden`
+  // sem o separador devolveria ao cliente a mensagem de qualquer Error que
+  // começasse com essa palavra.
+  if (err instanceof Error && err.message.startsWith('Forbidden:')) {
     return c.json({ error: err.message }, 403);
   }
   // Tudo aqui é defensivo de propósito: um handler de erro que estoura
