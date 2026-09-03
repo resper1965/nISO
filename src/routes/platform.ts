@@ -218,15 +218,26 @@ platformApp.get('/dashboard', async (c) => {
 platformApp.get('/dashboard/stats', async (c) => {
   try {
     const user = c.get('user');
-    const isClient = user && (user.role === 'org_admin' || user.role === 'org_user' || user.role === 'client');
-    const projectId = isClient ? user.client_project_id : null;
-    
-    const whereResource = projectId ? 'WHERE project_id = ?' : '';
-    const whereProject = projectId ? 'WHERE id = ?' : '';
-    const params = projectId ? [projectId] : [];
+    const isClient = !!user && (user.role === 'org_admin' || user.role === 'org_user' || user.role === 'client');
+
+    // `escopo === null` é o ramo de plataforma. Para papel de cliente o escopo
+    // é sempre string — inclusive VAZIA, e é essa a correção: antes o filtro
+    // era `projectId ? ...`, então cliente sem projeto caía no ramo sem WHERE e
+    // recebia a contagem da plataforma inteira. Com `''`, nada casa.
+    const escopo: string | null = isClient ? (user.client_project_id ?? '') : null;
+    const filtrar = escopo !== null;
+
+    const whereResource = filtrar ? 'WHERE project_id = ?' : '';
+    const whereProject = filtrar ? 'WHERE id = ?' : '';
+    const params = filtrar ? [escopo] : [];
 
     const stats: any = await c.env.DB.batch([
-      c.env.DB.prepare('SELECT count(*) as count FROM leads'),
+      // O funil comercial é da ness. (ver `somenteNess` em helpers.ts): cliente
+      // não vê lead — nem o conteúdo, nem quantos existem. A contagem era
+      // global para todo mundo.
+      filtrar
+        ? c.env.DB.prepare('SELECT 0 as count')
+        : c.env.DB.prepare('SELECT count(*) as count FROM leads'),
       c.env.DB.prepare(`SELECT count(*) as count FROM projects ${whereProject}`).bind(...params),
       c.env.DB.prepare(`SELECT count(*) as count FROM compliance_controls ${whereResource} ${whereResource ? "AND" : "WHERE"} status = 'Completed'`).bind(...params),
       c.env.DB.prepare(`SELECT count(*) as count FROM evidence ${whereResource} ${whereResource ? "AND" : "WHERE"} evaluation_status = 'pending'`).bind(...params),
@@ -332,9 +343,18 @@ platformApp.put('/notifications/:id/read', async (c) => {
 platformApp.get('/portfolio', async (c) => {
   try {
     const user = c.get('user');
+    // O filtro depende do PAPEL, não de o escopo estar preenchido. Antes a
+    // condição exigia `&& user.client_project_id`: um papel de cliente sem
+    // projeto caía no ramo de plataforma e recebia a carteira de TODOS os
+    // tenants. E essa conta é criável hoje — `createUserSchema` declara
+    // `client_project_id` como `.nullable().optional()`.
+    //
+    // Com o escopo vazio, o `WHERE id = ''` não casa com nada: escopo ausente
+    // significa NADA, nunca TUDO. É a mesma postura que `middleware/auth.ts`
+    // já aplica à chave de API sem projeto.
     let stmt = c.env.DB.prepare('SELECT * FROM projects ORDER BY created_at DESC');
-    if (user && (user.role === 'org_admin' || user.role === 'org_user' || user.role === 'client') && user.client_project_id) {
-      stmt = c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(user.client_project_id);
+    if (user && (user.role === 'org_admin' || user.role === 'org_user' || user.role === 'client')) {
+      stmt = c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(user.client_project_id ?? '');
     }
     const { results } = await stmt.all();
     return c.json({ ok: true, portfolio: results || [], projects: results || [] });

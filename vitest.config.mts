@@ -51,14 +51,15 @@ export default defineConfig({
       //
       // 2026-08: ~55.8% stmts / 43% br / 62.6% fn / 57.7% lines, após os testes
       //   de agents/ (assessment, evidence) e services/ RAG.
-      // 2026-09: 60.9% stmts / 47.9% br / 66.6% fn / 63.1% lines, após o
-      //   inventário de IDOR nos recursos de topo (capa, ropa, certification,
-      //   assets, dpia, webhooks, api-keys, notifications, audits).
+      // 2026-09: 65.5% stmts / 54.1% br / 72.4% fn / 68.0% lines, ao fim da
+      //   onda 1 do plano — contrato de isolamento das rotas de topo,
+      //   inventário de IDOR, portfólio/portal do cliente e o CRUD dos seis
+      //   módulos de projeto.
       thresholds: {
-        statements: 57,
-        branches: 44,
-        functions: 63,
-        lines: 59,
+        statements: 62,
+        branches: 50,
+        functions: 69,
+        lines: 64,
       },
     },
   },

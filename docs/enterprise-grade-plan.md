@@ -124,11 +124,11 @@ Segue a análise de testes já feita, na ordem de risco.
 
 | # | Ação | Critério de saída |
 |---|---|---|
-| 1.1 | Teste de **contrato** da guarda de recurso: varre `src/routes/*.ts`, lista todo handler `:id` fora de `/projects/:projectId/*`, falha se não houver guarda | teste novo falha ao remover a guarda de uma rota qualquer |
+| 1.1 | ~~Teste de **contrato** da guarda de recurso~~ **feito** | `test/contrato-isolamento-topo.test.ts`: descobre as 77 rotas lendo o fonte e dispara cada uma com id forjado. Comprovado por mutação — revertida a correção do `onError`, ele acusa as 2 rotas, com arquivo e linha |
 | 1.2 | ~~Estender `idor-tenant.test.ts` aos 9 recursos faltantes~~ **feito** | cada recurso responde 403 ao tenant vizinho, com a linha conferida depois |
-| 1.3 | `platform.test.ts`: portfólio e os três dashboards de cliente | `platform.ts` acima de 70% |
-| 1.4 | Teste parametrizado dos 6 CRUDs de módulo (capa, audits, vendors, training, ropa, certifications) | os 6 acima de 70% |
-| 1.5 | Subir a catraca do backend | pisos em ~70/55/72/70, CI verde |
+| 1.3 | ~~Portfólio e dashboards de cliente~~ **feito** | `platform.ts` de 40% para **71,8%** |
+| 1.4 | ~~Teste parametrizado dos 6 CRUDs de módulo~~ **feito** | os 6 acima de 70%: audits 92,7 · capa 90,9 · training 90,2 · certifications 82,8 · vendors 76,5 · ropa 76,4 |
+| 1.5 | ~~Subir a catraca do backend~~ **feito** | pisos em 62/50/69/64, abaixo do atingido (65,5 / 54,1 / 72,4 / 68,0); 58 arquivos e 530 testes verdes |
 
 Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
 
@@ -140,6 +140,26 @@ Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
 > eixo 4. Corrigido traduzindo o prefixo `Forbidden` no `app.onError`, o que
 > fecha a classe inteira. É o argumento do item 1.1 em forma concreta: a guarda
 > ser convenção manual não falha só por ausência — falha também por colocação.
+
+> O item 1.3 confirmou por sonda o que este plano listava como suspeita: em
+> `/portfolio` e `/dashboard/stats` o filtro só valia **quando**
+> `client_project_id` estava preenchido, então papel de cliente SEM projeto caía
+> no ramo de plataforma e recebia a carteira e as contagens de TODOS os tenants.
+> A conta é criável hoje (`createUserSchema` declara o campo como
+> `.nullable().optional()` e `role` é `z.string()` livre). Corrigido para falhar
+> fechado — escopo ausente significa nada, nunca tudo —, junto com a contagem de
+> leads, que era global para todo cliente apesar do `somenteNess`.
+
+### Achados da onda 1 ainda em aberto
+
+Encontrados pelos testes acima e deliberadamente NÃO corrigidos junto: um exige
+migration (e a onda 2 traz o staging onde ensaiá-la), o outro não é verificável
+sem o binding `ASSETS`.
+
+| # | Achado | Encaminhamento |
+|---|---|---|
+| A1 | `/api/v1/client/assessment` e `/api/v1/client/proposal` estão **mortas**: as duas exigem `user.client_lead_id`, coluna que não existe em `schema.sql` nem em nenhuma das 25 migrations, e que o login não seleciona. O comentário que justifica o `somenteNess` em `routes/proposals.ts` afirma que esse é "o caminho legítimo do cliente para a própria proposta" — hoje o cliente não alcança a própria proposta por caminho nenhum | Precisa de migration + `SELECT` no login + quem grava o vínculo. `test/platform-portfolio.test.ts` fixa o 404 atual e FALHA quando a coluna aparecer, forçando revisitar o comentário no mesmo commit |
+| A2 | `GET /api/v1/policies/templates/:templateName` devolve **500** para nome inexistente, em vez de 404 — `generate()` lança e o handler traduz tudo para `erro500` | Mesma classe do 403-vs-500 já corrigido. Não dá para verificar a correção sem o binding `ASSETS`, ausente no ambiente de teste |
 
 ### Onda 2 — Confiabilidade da mudança
 
