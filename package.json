@@ -15,11 +15,11 @@
     "db:backup:local": "wrangler d1 export niso-db --local --output backups/local-backup.sql"
   },
   "dependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.20.3",
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@types/node": "^26.1.1",
     "hono": "^4.13.5",
-    "typescript": "^5.5.2",
-    "vitest": "^4.1.10",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11",
     "wrangler": "^4.107.0",
     "zod": "^4.4.3"
   },
