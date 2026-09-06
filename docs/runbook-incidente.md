@@ -148,11 +148,24 @@ npx wrangler d1 execute niso-db --remote --command \
       WHERE actor='alguem@exemplo.com' ORDER BY created_at DESC LIMIT 50;"
    ```
 
-> **Limite a declarar num relato de incidente:** `audit_logs` **não é imutável** —
-> nada no schema barra `UPDATE`/`DELETE`. Quem tem acesso ao D1 pode alterá-la.
-> Para efeito de auditoria, a trilha vale contra erro operacional, não contra
-> adulteração deliberada por quem tem esse acesso. Fechar isso é o item 4.4 do
-> `enterprise-grade-plan.md`.
+> **Correção de uma afirmação anterior deste runbook.** Ele dizia que
+> `audit_logs` não é imutável e que nada no schema barra `UPDATE`/`DELETE`.
+> Está errado: a migration `0018_data_hardening.sql` cria os triggers
+> `audit_logs_no_update` e `audit_logs_no_delete`, que abortam as duas
+> operações, e eles **estão** no banco de produção — conferido em 2026-09-06:
+>
+> ```
+> SELECT name, type FROM sqlite_master WHERE type='trigger';
+> → audit_logs_no_update | trigger
+> → audit_logs_no_delete | trigger
+> ```
+>
+> **O limite que continua valendo**, e que é o que importa declarar num relato:
+> quem tem acesso ao D1 pode `DROP TRIGGER` e então alterar a trilha. Os
+> triggers protegem contra erro de aplicação e contra `UPDATE`/`DELETE` avulso;
+> não protegem contra quem administra o banco. Trilha à prova disso exige cópia
+> fora do D1 (append-only, com retenção própria) — é o item 4.4 do
+> `enterprise-grade-plan.md`, e é só essa parte que segue em aberto.
 
 ## 7. Comunicar
 

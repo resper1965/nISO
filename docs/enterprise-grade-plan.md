@@ -124,12 +124,12 @@ Segue a análise de testes já feita, na ordem de risco.
 
 | # | Ação | Critério de saída |
 |---|---|---|
-| 1.1 | Teste de contrato da guarda de recurso — **PARCIAL** | Entregue: `test/contrato-isolamento-topo.test.ts` descobre as 77 rotas lendo o fonte e prova que nenhuma responde 2xx ou 5xx a id forjado (achou os dois 500 de webhooks). **Não** cumpre o critério original: por mutação, removida a guarda de um handler de `evidence.ts`, o teste seguiu VERDE — rota sem guarda devolve 404 para id inexistente, e 404 passa. Falta o 1.6 |
+| 1.1 | ~~Teste de contrato da guarda de recurso~~ **feito** (com o 1.6) | `test/contrato-isolamento-topo.test.ts` descobre as 77 rotas lendo o fonte e faz DUAS varreduras. A parcialidade anotada aqui antes — a de que a mutação em `evidence.ts` deixava o teste verde — foi fechada pelo 1.6 |
 | 1.2 | ~~Estender `idor-tenant.test.ts` aos 9 recursos faltantes~~ **feito** | 8 dos 9 respondem 403 ao tenant vizinho, com a linha conferida depois. O 9º (`notifications/:id/read`) responde **200** por desenho — o escopo dela é o dono, não o projeto — e ali a asserção é sobre a linha, não sobre o status |
 | 1.3 | ~~Portfólio e dashboards de cliente~~ **feito** | `platform.ts` de **26,1%** (medido na `main`) para **71,8%**. O "40%" citado numa versão anterior deste documento era a medição intermediária, depois do commit do item 1.2 — não a linha de base |
 | 1.4 | ~~Teste parametrizado dos 6 CRUDs de módulo~~ **feito** | os 6 acima de 70%: audits 92,7 · capa 90,9 · training 90,2 · certifications 82,8 · vendors 76,5 · ropa 76,4 |
 | 1.5 | Subir a catraca do backend — **PARCIAL** | Alvo original: ~70/55/72/70. Atingido: 65,5 / 54,1 / 72,4 / 68,0 — passa em `functions`, falha nas outras três. Pisos hoje em 62/50/69/64, abaixo do atingido, como degrau; o alvo permanece ~70/55/72/70 |
-| 1.6 | **NOVO** — semear recurso real do outro tenant por rota, para o contrato do 1.1 detectar guarda AUSENTE (e não só mal colocada) | remover `requireResourceAccess` de qualquer handler faz o teste falhar |
+| 1.6 | ~~Semear recurso real do outro tenant, para o contrato detectar guarda AUSENTE~~ **feito** | Critério cumprido e verificado por mutação: removida a chamada de `requireResourceAccess` em `src/routes/evidence.ts:18`, a varredura 1 segue verde e a **varredura 2 falha** com `200 GET /api/v1/evidence/:id/detail`. A semeadura é derivada do banco (`sqlite_master` + `PRAGMA table_info`), então tabela nova entra sozinha. Rota que para no 400 antes da guarda também falha o teste — força um corpo mínimo em `CORPOS` em vez de passar por verde sem exercitar nada |
 
 Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
 
@@ -162,14 +162,14 @@ Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
 
 ### Achados da onda 1 ainda em aberto
 
-Encontrados pelos testes acima e deliberadamente NÃO corrigidos junto: um exige
-migration (e a onda 2 traz o staging onde ensaiá-la), o outro não é verificável
-sem o binding `ASSETS`.
+O A2 foi corrigido depois (ver abaixo). O A1 segue aberto: exige migration, e
+mexer no vínculo cliente↔lead sem staging onde ensaiar é o que a onda 2 evita.
 
 | # | Achado | Encaminhamento |
 |---|---|---|
 | A1 | `/api/v1/client/assessment` e `/api/v1/client/proposal` estão **mortas**: as duas exigem `user.client_lead_id`, coluna que não existe em `schema.sql` nem em nenhuma das 25 migrations, e que o login não seleciona. O comentário que justifica o `somenteNess` em `routes/proposals.ts` afirma que esse é "o caminho legítimo do cliente para a própria proposta" — hoje o cliente não alcança a própria proposta por caminho nenhum | Precisa de migration + `SELECT` no login + quem grava o vínculo. `test/platform-portfolio.test.ts` fixa o 404 atual e FALHA quando a coluna aparecer, forçando revisitar o comentário no mesmo commit |
-| A2 | `GET /api/v1/policies/templates/:templateName` devolve **500** para nome inexistente, em vez de 404 — `generate()` lança e o handler traduz tudo para `erro500` | Mesma classe do 403-vs-500 já corrigido. Não dá para verificar a correção sem o binding `ASSETS`, ausente no ambiente de teste |
+| A2 | ~~`GET /api/v1/policies/templates/:templateName` devolve **500** para nome inexistente~~ **corrigido** | O bloqueio era o binding `ASSETS` ausente no teste; resolvido apontando o `wrangler.test.jsonc` para `src` (onde os templates moram), e não para `frontend/dist` — que amarraria a suíte a um build prévio. `generate()` passou a lançar `TemplateNaoEncontrado`, e só esse tipo vira 404: 5xx do ASSETS continua 500, porque aí a falha é nossa |
+| A3 | **NOVO, achado ao fechar o A2** — o catálogo `listAvailableTemplates()` anunciava `soa-template`, arquivo que **nunca existiu**: o consultor clicava e recebia erro. E omitia `risk-policy` e `vendor-risk-assessment`, que existem e ficavam invisíveis. Havia teste afirmando que a lista contém `soa-template` — ele pinava a falha em vez de pegá-la | Catálogo corrigido para o que existe; `test/policies-templates.test.ts` busca CADA nome pelo ASSETS real e falha se algum não voltar 200. Falta o conteúdo: **não há template de Declaração de Aplicabilidade (SoA)**, que é documento central da ISO 27001 — lacuna de produto, no eixo de conteúdo, não de código |
 
 ### Onda 2 — Confiabilidade da mudança
 
@@ -214,7 +214,7 @@ padrão do Spec Kit antes do código.
 | 4.1 | SSO por OIDC (Entra ID, Okta, Google Workspace) | login federado com provisionamento no primeiro acesso |
 | 4.2 | SCIM 2.0 para provisionamento e **desprovisionamento** | usuário desligado no IdP perde acesso sem ação manual |
 | 4.3 | Política de segurança por tenant | MFA obrigatório, TTL de sessão e allowlist de IP configuráveis por cliente |
-| 4.4 | `audit_logs` imutável | trigger que barra `UPDATE`/`DELETE`; teste que prova a barreira |
+| 4.4 | `audit_logs` imutável — **parte já existe** | Os triggers `audit_logs_no_update`/`audit_logs_no_delete` (migration `0018_data_hardening.sql`) barram as duas operações e **estão em produção** (conferido em 2026-09-06 via `sqlite_master`). O `runbook-incidente.md` afirmava o contrário e foi corrigido. O que falta é o degrau seguinte: quem tem acesso ao D1 pode `DROP TRIGGER` — trilha à prova disso exige cópia append-only fora do D1, com retenção própria |
 | 4.5 | Retenção de trilha e evidência | política declarada, executada pelo cron da onda 2 |
 | 4.6 | Portabilidade do tenant | export assinado do cliente inteiro (LGPD art. 18, V) |
 
