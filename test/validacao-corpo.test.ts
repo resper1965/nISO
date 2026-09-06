@@ -230,11 +230,17 @@ describe('Catraca de leituras de corpo sem schema', () => {
 
   it('não cresce', () => {
     const ocorrencias: string[] = [];
-    for (const [caminho, src] of Object.entries(fontes)) {
-      if (caminho.includes('.test.')) continue;
+    for (const [chave, src] of Object.entries(fontes)) {
+      // A chave do glob é relativa a ESTE arquivo (`../src/routes/x.ts`); a
+      // mensagem de falha quer o caminho do repositório. Reconstruído a partir
+      // do nome do módulo, não por `replace('../', '')` — que recortaria só a
+      // primeira ocorrência e é frágil à toa quando o nome já está em mãos.
+      const modulo = chave.split('/').pop() ?? chave;
+      if (modulo.includes('.test.')) continue;
+      const caminho = `src/routes/${modulo}`;
       src.split('\n').forEach((linha, i) => {
         if (/c\.req\.json/.test(linha)) {
-          ocorrencias.push(`${caminho.replace('../', '')}:${i + 1}`);
+          ocorrencias.push(`${caminho}:${i + 1}`);
         }
       });
     }
