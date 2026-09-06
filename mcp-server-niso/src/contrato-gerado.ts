@@ -47,6 +47,8 @@ export const ROTAS = {
   'PUT /api/v1/admin/users/{id}': { obrigatorios: [] },
   'PUT /api/v1/audit-findings/{id}': { obrigatorios: [] },
   'PUT /api/v1/auditor-notes/{id}/respond': { obrigatorios: ['response'] },
+  'PUT /api/v1/audits/{id}': { obrigatorios: ['audit_type', 'status', 'title'] },
+  'PUT /api/v1/capa/{id}': { obrigatorios: ['status', 'title'] },
   'PUT /api/v1/certification/{id}': { obrigatorios: [] },
   'PUT /api/v1/controls/{id}': { obrigatorios: [] },
   'PUT /api/v1/controls/{id}/maturity': { obrigatorios: ['maturity'] },
@@ -58,7 +60,10 @@ export const ROTAS = {
   'PUT /api/v1/projects/{id}/documents/{docId}': { obrigatorios: [] },
   'PUT /api/v1/projects/{id}/phases/{num}': { obrigatorios: [] },
   'PUT /api/v1/proposals/{id}': { obrigatorios: [] },
+  'PUT /api/v1/risks/{id}': { obrigatorios: ['asset', 'threat'] },
   'PUT /api/v1/ropa/{id}': { obrigatorios: ['processing_purpose'] },
+  'PUT /api/v1/training/{id}': { obrigatorios: ['employee_name', 'training_name'] },
+  'PUT /api/v1/vendors/{id}': { obrigatorios: ['name'] },
 } as const;
 
 /** `"MÉTODO /caminho"` — a união exata do que a API declara aceitar. */

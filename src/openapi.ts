@@ -2,11 +2,13 @@ import { z } from 'zod';
 import {
   aceiteDePoliticaSchema,
   assinaturaSchema,
+  audiUpdateSchema,
   auditFindingSchema,
   auditFindingUpdateSchema,
   auditorNoteSchema,
   auditorResponseSchema,
   auditorTokenSchema,
+  capaUpdateSchema,
   certificationSchema,
   chatSchema,
   cnpjSchema,
@@ -38,6 +40,7 @@ import {
   proposalUpdateSchema,
   resetConfirmSchema,
   resetRequestSchema,
+  riskUpdateSchema,
   ropaApprovalSchema,
   ropaSchema,
   scopeChangeSchema,
@@ -47,7 +50,9 @@ import {
   statusSchema,
   trainingImportSchema,
   trainingSchema,
+  trainingUpdateSchema,
   updateUserSchema,
+  vendorUpdateSchema,
 } from './schemas';
 
 /**
@@ -62,13 +67,16 @@ import {
  *
  * O que ainda é manual — e o que impede isso de apodrecer.
  *
- * A tabela abaixo liga método+caminho ao schema. Ela é manual porque o
- * runtime do Worker não tem acesso ao fonte (o `import.meta.glob(..., '?raw')`
- * que os testes de contrato usam é do Vite, e o bundle de produção é esbuild).
- * Uma tabela manual envelhece — então `test/openapi.test.ts` lê o fonte,
- * encontra TODA chamada de `validateBody` e falha se alguma não estiver aqui,
- * ou se alguma entrada daqui não corresponder mais a uma rota real. A tabela é
- * manual; a obrigação de mantê-la não é.
+ * A tabela abaixo liga método+caminho ao schema, e existe porque o runtime do
+ * Worker não tem acesso ao fonte (o `import.meta.glob(..., '?raw')` que os
+ * testes de contrato usam é do Vite; o bundle de produção é esbuild). Ela é
+ * REGERADA por `npm run openapi`, que lê o fonte — a região entre os marcadores
+ * é reescrita inteira, então não vale editá-la à mão.
+ *
+ * E `test/openapi.test.ts` fecha o círculo: lê o fonte, encontra TODA chamada de
+ * `validateBody` e falha se alguma não estiver aqui, ou se alguma entrada daqui
+ * não corresponder mais a uma rota real. Quem esquecer de rodar o gerador
+ * descobre no teste, não em produção.
  *
  * O que este documento NÃO descreve, e por quê: as respostas de sucesso. Elas
  * não têm schema no código — os handlers montam o JSON à mão — e inventar aqui
@@ -85,6 +93,7 @@ type Entrada = {
   nome: string;
 };
 
+// ─── INÍCIO DA TABELA GERADA — `npm run openapi` reescreve daqui até o fim ───
 export const ROTAS_COM_SCHEMA: Entrada[] = [
   { metodo: 'PUT', caminho: '/api/v1/admin/users/:id', schema: updateUserSchema, nome: 'updateUserSchema' },
   { metodo: 'POST', caminho: '/api/v1/admin/users', schema: createUserSchema, nome: 'createUserSchema' },
@@ -92,6 +101,7 @@ export const ROTAS_COM_SCHEMA: Entrada[] = [
   { metodo: 'PUT', caminho: '/api/v1/auditor-notes/:id/respond', schema: auditorResponseSchema, nome: 'auditorResponseSchema' },
   { metodo: 'POST', caminho: '/api/v1/auditor/:token/notes', schema: auditorNoteSchema, nome: 'auditorNoteSchema' },
   { metodo: 'POST', caminho: '/api/v1/audits/:auditId/findings', schema: auditFindingSchema, nome: 'auditFindingSchema' },
+  { metodo: 'PUT', caminho: '/api/v1/audits/:id', schema: audiUpdateSchema, nome: 'audiUpdateSchema' },
   { metodo: 'POST', caminho: '/api/v1/auth/change-password', schema: mudarSenhaSchema, nome: 'mudarSenhaSchema' },
   { metodo: 'POST', caminho: '/api/v1/auth/forgot-password', schema: resetRequestSchema, nome: 'resetRequestSchema' },
   { metodo: 'POST', caminho: '/api/v1/auth/login', schema: loginSchema, nome: 'loginSchema' },
@@ -102,6 +112,7 @@ export const ROTAS_COM_SCHEMA: Entrada[] = [
   { metodo: 'POST', caminho: '/api/v1/auth/reset-password-first', schema: primeiroAcessoSchema, nome: 'primeiroAcessoSchema' },
   { metodo: 'POST', caminho: '/api/v1/auth/reset-password', schema: resetConfirmSchema, nome: 'resetConfirmSchema' },
   { metodo: 'POST', caminho: '/api/v1/auth/setup', schema: setupSchema, nome: 'setupSchema' },
+  { metodo: 'PUT', caminho: '/api/v1/capa/:id', schema: capaUpdateSchema, nome: 'capaUpdateSchema' },
   { metodo: 'PUT', caminho: '/api/v1/certification/:id', schema: certificationSchema, nome: 'certificationSchema' },
   { metodo: 'PUT', caminho: '/api/v1/controls/:id/maturity', schema: maturitySchema, nome: 'maturitySchema' },
   { metodo: 'PUT', caminho: '/api/v1/controls/:id/status', schema: statusSchema, nome: 'statusSchema' },
@@ -136,8 +147,12 @@ export const ROTAS_COM_SCHEMA: Entrada[] = [
   { metodo: 'POST', caminho: '/api/v1/public/policies/ack', schema: aceiteDePoliticaSchema, nome: 'aceiteDePoliticaSchema' },
   { metodo: 'POST', caminho: '/api/v1/public/policies/request-otp', schema: otpPedidoSchema, nome: 'otpPedidoSchema' },
   { metodo: 'POST', caminho: '/api/v1/public/policies/verify-otp', schema: otpVerificacaoSchema, nome: 'otpVerificacaoSchema' },
+  { metodo: 'PUT', caminho: '/api/v1/risks/:id', schema: riskUpdateSchema, nome: 'riskUpdateSchema' },
   { metodo: 'PUT', caminho: '/api/v1/ropa/:id', schema: ropaSchema, nome: 'ropaSchema' },
+  { metodo: 'PUT', caminho: '/api/v1/training/:id', schema: trainingUpdateSchema, nome: 'trainingUpdateSchema' },
+  { metodo: 'PUT', caminho: '/api/v1/vendors/:id', schema: vendorUpdateSchema, nome: 'vendorUpdateSchema' },
 ];
+// ─── FIM DA TABELA GERADA ───
 
 /** `/api/v1/x/:id` → `/api/v1/x/{id}`, que é a forma do OpenAPI. */
 function caminhoOpenApi(caminho: string): string {

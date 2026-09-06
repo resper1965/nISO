@@ -18,7 +18,7 @@
  *
  * Uso: `npm run openapi`
  */
-import { writeFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import esbuild from 'esbuild';
 
@@ -26,6 +26,74 @@ import esbuild from 'esbuild';
 // sentido embutir uma cópia só para ler schemas), e módulo em /tmp não enxerga
 // o node_modules daqui.
 const saida = new URL('../node_modules/.cache/niso-openapi.mjs', import.meta.url).pathname;
+
+// ─── 1. Reescrever a tabela rota↔schema de src/openapi.ts a partir do fonte ───
+//
+// A tabela vive no runtime (o Worker não lê o fonte), mas a VERDADE está no
+// fonte. Regerá-la aqui é o que impede a divergência de nascer; o teste de
+// contrato é a rede para quem esquecer de rodar isto.
+
+const raiz = new URL('..', import.meta.url).pathname;
+const idx = readFileSync(`${raiz}/src/index.ts`, 'utf8');
+
+const mount = {};
+for (const m of idx.matchAll(/app\.route\(\s*'([^']*)'\s*,\s*(\w+)\s*\)/g)) mount[m[2]] = m[1];
+
+const moduloDe = {};
+for (const m of idx.matchAll(/import\s+(?:\{([^}]+)\}|(\w+))\s+from\s+'\.\/routes\/([\w-]+)'/g)) {
+  if (m[1]) for (const v of m[1].split(',')) moduloDe[v.trim()] = m[3];
+  else moduloDe[m[2]] = m[3];
+}
+
+const entradas = [];
+for (const [routerVar, modulo] of Object.entries(moduloDe)) {
+  if (!(routerVar in mount)) continue;
+  let src;
+  try {
+    src = readFileSync(`${raiz}/src/routes/${modulo}.ts`, 'utf8');
+  } catch {
+    continue;
+  }
+  let atual = null;
+  src.split('\n').forEach((linha) => {
+    const r = linha.match(/^\s*(\w+)\.(get|post|put|patch|delete)\(\s*'([^']*)'/);
+    if (r) {
+      // Rota de OUTRO router no mesmo arquivo zera o contexto — sem isto o
+      // `validateBody` seguinte seria atribuído à rota errada.
+      atual = r[1] === routerVar
+        ? { metodo: r[2].toUpperCase(), caminho: (mount[routerVar] + r[3]).replace(/\/$/, '') || '/' }
+        : null;
+      return;
+    }
+    const vb = linha.match(/validateBody\(c,\s*(\w+)\)/);
+    if (vb && atual) entradas.push({ ...atual, nome: vb[1] });
+  });
+}
+entradas.sort((a, b) => (a.caminho + a.metodo).localeCompare(b.caminho + b.metodo));
+
+const nomes = [...new Set(entradas.map((e) => e.nome))].sort();
+const bloco = [
+  '// ─── INÍCIO DA TABELA GERADA — `npm run openapi` reescreve daqui até o fim ───',
+  'export const ROTAS_COM_SCHEMA: Entrada[] = [',
+  ...entradas.map((e) => `  { metodo: '${e.metodo}', caminho: '${e.caminho}', schema: ${e.nome}, nome: '${e.nome}' },`),
+  '];',
+  '// ─── FIM DA TABELA GERADA ───',
+].join('\n');
+
+const arquivoOpenapi = `${raiz}/src/openapi.ts`;
+let fonte = readFileSync(arquivoOpenapi, 'utf8');
+fonte = fonte.replace(
+  /\/\/ ─── INÍCIO DA TABELA GERADA[\s\S]*?\/\/ ─── FIM DA TABELA GERADA ───/,
+  bloco
+);
+fonte = fonte.replace(
+  /import \{\n(?:  \w+,\n)+\} from '\.\/schemas';/,
+  `import {\n${nomes.map((n) => `  ${n},`).join('\n')}\n} from './schemas';`
+);
+writeFileSync(arquivoOpenapi, fonte);
+console.log(`src/openapi.ts: ${entradas.length} rotas na tabela`);
+
+// ─── 2. Emitir docs/openapi.json a partir do módulo já atualizado ───
 
 await esbuild.build({
   entryPoints: [new URL('../src/openapi.ts', import.meta.url).pathname],

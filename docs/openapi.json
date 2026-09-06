@@ -832,6 +832,177 @@
         }
       }
     },
+    "/api/v1/audits/{id}": {
+      "put": {
+        "operationId": "put_api_v1_audits__id_",
+        "tags": [
+          "audits"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "audit_type": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "scheduled_date": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "auditor_name": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "scope": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "findings_count": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "audit_type",
+                  "title",
+                  "status"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "Payload inválido — corpo recusado pelo schema, com `details` por campo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "description": "Sessão válida, sem acesso ao recurso ou ao projeto"
+          },
+          "500": {
+            "description": "Erro de servidor. `request_id` correlaciona com o log estruturado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/change-password": {
       "post": {
         "operationId": "post_api_v1_auth_change_password",
@@ -1807,6 +1978,202 @@
                   "password",
                   "name"
                 ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "Payload inválido — corpo recusado pelo schema, com `details` por campo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "description": "Sessão válida, sem acesso ao recurso ou ao projeto"
+          },
+          "500": {
+            "description": "Erro de servidor. `request_id` correlaciona com o log estruturado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/capa/{id}": {
+      "put": {
+        "operationId": "put_api_v1_capa__id_",
+        "tags": [
+          "capa"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "audit_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "risk_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "control_id": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "severity": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "assigned_to": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "due_date": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "resolution": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "title",
+                  "status"
+                ],
+                "additionalProperties": {}
               }
             }
           }
@@ -6846,6 +7213,122 @@
         }
       }
     },
+    "/api/v1/risks/{id}": {
+      "put": {
+        "operationId": "put_api_v1_risks__id_",
+        "tags": [
+          "risks"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "asset": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "threat": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "asset",
+                  "threat"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "Payload inválido — corpo recusado pelo schema, com `details` por campo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "description": "Sessão válida, sem acesso ao recurso ou ao projeto"
+          },
+          "500": {
+            "description": "Erro de servidor. `request_id` correlaciona com o log estruturado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/ropa/{id}": {
       "put": {
         "operationId": "put_api_v1_ropa__id_",
@@ -7028,6 +7511,273 @@
                 },
                 "required": [
                   "processing_purpose"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "Payload inválido — corpo recusado pelo schema, com `details` por campo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "description": "Sessão válida, sem acesso ao recurso ou ao projeto"
+          },
+          "500": {
+            "description": "Erro de servidor. `request_id` correlaciona com o log estruturado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/training/{id}": {
+      "put": {
+        "operationId": "put_api_v1_training__id_",
+        "tags": [
+          "training"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "employee_name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "training_name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "completion_date": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "score": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "status": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "evidence_file": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "employee_name",
+                  "training_name"
+                ],
+                "additionalProperties": {}
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "Payload inválido — corpo recusado pelo schema, com `details` por campo",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sem sessão válida"
+          },
+          "403": {
+            "description": "Sessão válida, sem acesso ao recurso ou ao projeto"
+          },
+          "500": {
+            "description": "Erro de servidor. `request_id` correlaciona com o log estruturado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "details": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "path": {
+                            "type": "string"
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "request_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/vendors/{id}": {
+      "put": {
+        "operationId": "put_api_v1_vendors__id_",
+        "tags": [
+          "vendors"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$schema": "https://json-schema.org/draft/2020-12/schema",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "name"
                 ],
                 "additionalProperties": {}
               }
