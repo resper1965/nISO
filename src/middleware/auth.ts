@@ -107,6 +107,13 @@ const MFA_PENDENTE_PERMITIDO = new Set([
 // /verify e fica trancado para fora em definitivo, mesmo com o código correto.
 const MFA_AUTO_SERVICO = /^\/api\/v1\/auth\/mfa\/(setup|activate|verify|disable)$/;
 
+// A própria senha, pelo mesmo argumento. `/reset-password-first` é o caminho
+// OBRIGATÓRIO do primeiro acesso (`users.requires_password_change`): sem esta
+// entrada, um `org_user` recém-criado recebe 403 ao definir a primeira senha e
+// não consegue usar a conta. Nenhuma das duas toca dado de tenant — as duas
+// escrevem só o hash do próprio usuário.
+const SENHA_AUTO_SERVICO = /^\/api\/v1\/auth\/(change-password|reset-password-first)$/;
+
 export const authMiddleware = createMiddleware<{ Bindings: Bindings; Variables: Variables }>(async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (PUBLIC_TOKEN_PREFIXES.some(p => path.startsWith(p))) {
@@ -210,6 +217,7 @@ export const authMiddleware = createMiddleware<{ Bindings: Bindings; Variables: 
       { methods: ['POST'], test: p => p.endsWith('/mcp/execute') },
       { methods: ['POST'], test: p => p.endsWith('/chat') },
       { methods: ['POST'], test: p => MFA_AUTO_SERVICO.test(p) },
+      { methods: ['POST'], test: p => SENHA_AUTO_SERVICO.test(p) },
     ];
     const isAllowed = allowedWrites.some(a => a.methods.includes(method) && a.test(path));
     if (!isAllowed) {
