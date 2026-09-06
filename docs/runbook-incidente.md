@@ -38,22 +38,29 @@ O nISO não tem plantão formal. Isto é o que existe de fato:
 | Deploy falhou | issue automática no repositório | `deploy.yml` abre e fecha sozinha |
 | Backup falhou | issue automática, label `backup` | `db-backup.yml` |
 | Produção fora do ar ou publicada pela metade | issue automática, label `uptime` | `uptime.yml`, sonda externa a cada 15 min |
-| Taxa de erro alta com o site NO ar | **ninguém** | ver a lacuna abaixo |
+| Taxa de erro alta com o site NO ar | issue automática, label `slo` | `slo.yml`, a cada 6h sobre o Analytics Engine |
 | Cliente reclama | quem atende | — |
 
 A sonda de `uptime.yml` roda **fora** da Cloudflare e faz as duas verificações
 da seção 0: `/health` e o envelope de validação do login. Ela abre uma issue
 única (label `uptime`) e a fecha sozinha quando produção volta.
 
-> **Lacuna que permanece.** A sonda pega o sistema fora do ar ou publicado pela
-> metade. Ela **não** pega taxa de erro: se 30% das requisições devolverem 500 e
-> a sonda cair nos 70% que respondem, ela passa. Ler isso exige consultar o
-> Analytics Engine, que grava e ninguém lê — é o item 3.5 do
-> `enterprise-grade-plan.md`, ainda aberto.
->
-> E a detecção não é imediata: schedule do GitHub Actions atrasa por fila (o
-> `db-backup.yml` sai rotineiramente horas depois do pedido). Conte dezenas de
-> minutos, não segundos.
+A sonda de `uptime.yml` pega o sistema fora do ar; o `slo.yml` pega o caso em
+que ele responde mal. São coisas diferentes de propósito: se 30% das requisições
+devolverem 500 e a sonda cair nos 70% que respondem, ela passa verde — e é o SLO
+que acusa.
+
+Tetos em vigor (24h, `scripts/slo.mjs`): **5xx acima de 1%** do total, e **p95
+acima de 800 ms** fora das rotas de IA. A IA fica de fora porque leva segundos
+por desenho — misturá-la faria o p95 subir com a ADOÇÃO do produto, e alerta que
+dispara quando o produto é mais usado é alerta que se aprende a ignorar.
+
+> **O que continua valendo como limite.** A detecção não é imediata: schedule do
+> GitHub Actions atrasa por fila (o `db-backup.yml` sai rotineiramente horas
+> depois do pedido), e a janela do SLO é de 24h. Conte dezenas de minutos para
+> uma queda, e horas para uma degradação. Isso é melhor que "ninguém vê" e pior
+> que monitoramento com plantão; quando o produto precisar de minutos, o caminho
+> é serviço de observabilidade de verdade, não apertar estes crons.
 
 ## 2. Deploy ruim — reverter
 
