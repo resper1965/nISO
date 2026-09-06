@@ -19,6 +19,13 @@
 		"enabled": true
 	},
 
+	// Identifica a versão publicada em `/health` (item 0.2). Binding nativo: não
+	// exige build step, e distingue dois deploys do MESMO commit — re-run do
+	// workflow, ou rollback e volta.
+	"version_metadata": {
+		"binding": "CF_VERSION_METADATA"
+	},
+
 	// Cron de manutenção (ver src/manutencao.ts). Diário às 04:10 UTC — fora do
 	// horário comercial no Brasil e deslocado da hora cheia, onde a fila de cron
 	// da Cloudflare é mais disputada. É a PRIMEIRA execução periódica do

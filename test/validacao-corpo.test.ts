@@ -408,3 +408,38 @@ describe('Catraca de `any` nos caminhos de autorização', () => {
     expect(casts, `cast do usuário para any no middleware:\n  ${casts.join('\n  ')}`).toEqual([]);
   });
 });
+
+/**
+ * `/health` distingue versão (item 0.2 do plano).
+ *
+ * O `AGENTS.md` dizia, com razão, que `/health` não servia para responder "está
+ * em produção?": ele respondia igual com código velho e código novo, e a sonda
+ * precisava de heurística — mandar um login vazio e olhar o formato do erro.
+ * Isso funciona até o dia em que o envelope de validação mudar; aí a sonda passa
+ * a mentir.
+ */
+describe('GET /health', () => {
+  it('continua público e responde ok', async () => {
+    const res = await pedir(worker, '/health');
+    expect(res.status).toBe(200);
+    expect((await res.json<any>()).status).toBe('ok');
+  });
+
+  it('traz o campo version', async () => {
+    const body = await (await pedir(worker, '/health')).json<any>();
+    expect(body).toHaveProperty('version');
+  });
+
+  it('sem a var injetada, diz "dev" — que é a verdade, não um placeholder', async () => {
+    const body = await (await pedir(worker, '/health')).json<any>();
+    expect(body.version).toBe('dev');
+  });
+
+  it('com a var injetada, devolve o SHA publicado', async () => {
+    const res = await worker.fetch(
+      new Request('http://localhost/health'),
+      { ...env, VERSAO_SHA: 'abc1234', AI: { run: async () => ({ response: 'stub' }) } } as any
+    );
+    expect((await res.json<any>()).version).toBe('abc1234');
+  });
+});

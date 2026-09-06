@@ -109,8 +109,8 @@ fechou.
 | # | Ação | Critério de saída |
 |---|---|---|
 | 0.1 | ~~Subir `hono` acima de 4.12.33~~ **feito** | `npm audit` sem o advisory GHSA-8j4g-w8fx-2239 — hoje em 4.13.5, 0 vulnerabilidades |
-| 0.2 | Expor versão em `/health` (SHA do commit via var de build) | `curl /health` devolve `version`; a sonda de produção do `AGENTS.md` passa a distinguir versão sem heurística |
-| 0.3 | Retomar `CHANGELOG.md` e tag por release | tag `vX.Y.Z` na `main`, changelog cobrindo de 8.0.0 até hoje |
+| 0.2 | ~~Expor versão em `/health`~~ **feito** | `/health` devolve `version` (SHA injetado por `wrangler deploy --var VERSAO_SHA`), mais `deployment_id` e `deployed_at` do binding `version_metadata` — que distinguem dois deploys do MESMO commit. Sem a var, responde `"dev"`, que é a verdade e não um placeholder. `AGENTS.md` atualizado; a sonda antiga fica como segunda evidência, porque prova comportamento e não só um rótulo. A sonda de `uptime.yml` alerta se `/health` voltar sem o campo — deploy que não saiu |
+| 0.3 | Retomar `CHANGELOG.md` e tag por release — **changelog feito; push das tags bloqueado** | `CHANGELOG.md` reconstruído do histórico do git, de 8.0.0 até hoje, agrupado em 8.1.0 / 8.2.0 / 8.3.0 — e a lacuna de dois meses fica registrada no topo em vez de apagada. As três tags anotadas foram criadas apontando para os commits certos da `main`, mas `git push origin v8.1.0 v8.2.0 v8.3.0` devolve **403** neste ambiente (mesma classe do bloqueio em `/actions/variables`). Rodar esse comando é o que falta |
 
 > **0.1 é o único item deste plano que é vulnerabilidade ativa.** A versão
 > instalada é `hono@4.12.32`; o advisory de ReDoS no middleware de CORS alcança
@@ -128,7 +128,7 @@ Segue a análise de testes já feita, na ordem de risco.
 | 1.2 | ~~Estender `idor-tenant.test.ts` aos 9 recursos faltantes~~ **feito** | 8 dos 9 respondem 403 ao tenant vizinho, com a linha conferida depois. O 9º (`notifications/:id/read`) responde **200** por desenho — o escopo dela é o dono, não o projeto — e ali a asserção é sobre a linha, não sobre o status |
 | 1.3 | ~~Portfólio e dashboards de cliente~~ **feito** | `platform.ts` de **26,1%** (medido na `main`) para **71,8%**. O "40%" citado numa versão anterior deste documento era a medição intermediária, depois do commit do item 1.2 — não a linha de base |
 | 1.4 | ~~Teste parametrizado dos 6 CRUDs de módulo~~ **feito** | os 6 acima de 70%: audits 92,7 · capa 90,9 · training 90,2 · certifications 82,8 · vendors 76,5 · ropa 76,4 |
-| 1.5 | Subir a catraca do backend — **PARCIAL** | Alvo original: ~70/55/72/70. Atingido: 65,5 / 54,1 / 72,4 / 68,0 — passa em `functions`, falha nas outras três. Pisos hoje em 62/50/69/64, abaixo do atingido, como degrau; o alvo permanece ~70/55/72/70 |
+| 1.5 | ~~Subir a catraca do backend~~ **feito** | Alvo original ~70/55/72/70, batido nas QUATRO métricas: **70,71 / 58,33 / 77,35 / 73,21**. O que fechou a diferença foi cobrir o funil comercial — `routes/assessments.ts` era o arquivo menos coberto do backend (15,7%) e é por onde entra dinheiro: questionário, precificação, proposta e conversão em projeto. Pisos subidos para 69/57/76/72, um ponto abaixo do atingido |
 | 1.6 | ~~Semear recurso real do outro tenant, para o contrato detectar guarda AUSENTE~~ **feito** | Critério cumprido e verificado por mutação: removida a chamada de `requireResourceAccess` em `src/routes/evidence.ts:18`, a varredura 1 segue verde e a **varredura 2 falha** com `200 GET /api/v1/evidence/:id/detail`. A semeadura é derivada do banco (`sqlite_master` + `PRAGMA table_info`), então tabela nova entra sozinha. Rota que para no 400 antes da guarda também falha o teste — força um corpo mínimo em `CORPOS` em vez de passar por verde sem exercitar nada |
 
 Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
