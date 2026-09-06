@@ -3,6 +3,8 @@ import { env } from 'cloudflare:test';
 import worker from '../src/index';
 import { hashPassword, verifyPassword } from '../src/helpers';
 import { applySchema, sessionFor, pedir } from './helpers/d1';
+import middlewareSrc from '../src/middleware/auth.ts?raw';
+import helpersSrc from '../src/helpers.ts?raw';
 
 /**
  * Validação de corpo nas rotas que mais custam quando aceitam lixo — e a
@@ -247,5 +249,56 @@ describe('Catraca de leituras de corpo sem schema', () => {
       `Use validateBody na rota nova, ou baixe o TETO no mesmo commit se estiver fechando outras.\n  ` +
       ocorrencias.join('\n  ')
     ).toBeLessThanOrEqual(TETO);
+  });
+});
+
+/**
+ * CATRACA — `any` nos caminhos de autorização (item 3.4 do plano).
+ *
+ * `any` é ruim em qualquer lugar, mas numa função de autorização é ruim de um
+ * jeito específico: `requireResourceAccess(db, tabela, id, user)` recebia
+ * `user: any`, então passar o objeto ERRADO — a linha do banco em vez da
+ * sessão, digamos — compilava, e `user.client_project_id` virava `undefined`.
+ * A comparação seguinte não explode: ela responde. Só o tipo pega isso, e pega
+ * antes de rodar.
+ *
+ * Escopo fechado de propósito: os dois arquivos que decidem QUEM PODE. O resto
+ * do `any` do projeto é dívida separada e não entra nesta catraca.
+ */
+describe('Catraca de `any` nos caminhos de autorização', () => {
+  const arquivos = {
+    'src/middleware/auth.ts': middlewareSrc,
+    'src/helpers.ts': helpersSrc,
+  };
+
+  /** Nomes que decidem autorização — não é o arquivo inteiro, são estas funções. */
+  const FUNCOES = [
+    'requireResourceAccess',
+    'requireProjectAccess',
+    'somenteNess',
+    'ehEquipeNess',
+    'resolveApiKeyUser',
+    'authMiddleware',
+  ];
+
+  it('nenhuma assinatura de função de autorização usa `any`', () => {
+    const infratores: string[] = [];
+    for (const [nome, src] of Object.entries(arquivos)) {
+      src.split('\n').forEach((linha, i) => {
+        const declara = FUNCOES.some((f) => linha.includes(f) && /function|=>|const/.test(linha));
+        if (declara && /\bany\b/.test(linha)) {
+          infratores.push(`${nome}:${i + 1}  ${linha.trim()}`);
+        }
+      });
+    }
+    expect(infratores, `\`any\` em assinatura de autorização:\n  ${infratores.join('\n  ')}`).toEqual([]);
+  });
+
+  it('o corpo do middleware de autenticação não converte o usuário com `as any`', () => {
+    // `(user as any).mfa_pending` desliga a checagem de tipo exatamente no
+    // campo que decide se o segundo fator vale. Um typo no nome do campo vira
+    // `undefined`, que é falsy — e o MFA deixa de ser exigido, em silêncio.
+    const casts = middlewareSrc.split('\n').filter((l) => /user as any/.test(l));
+    expect(casts, `cast do usuário para any no middleware:\n  ${casts.join('\n  ')}`).toEqual([]);
   });
 });
