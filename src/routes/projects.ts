@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
-import { genId, genToken, logAudit, validateUpload, erro500, somenteNess } from '../helpers';
+import { genId, genToken, logAudit, validateUpload, erro500, somenteNess, sha256Hex } from '../helpers';
 import { PHASE_TITLES, PHASE_CHECKLISTS } from '../constants';
 import { MigrationService } from '../services/migration-service';
 import { seedPhases } from '../services/project-setup';
@@ -16,6 +16,50 @@ import { ipPermitido } from '../politica-tenant';
 import { papelValidoParaSso } from '../sso';
 
 export const projectsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+/**
+ * Emite o token SCIM deste cliente (item 4.2 do plano).
+ *
+ * O token é mostrado UMA VEZ e guardado só como hash — quem tem acesso ao banco
+ * não deve conseguir se passar pelo IdP do cliente, que é justamente quem tem
+ * poder de desativar contas. Mesma disciplina de `api_keys.key_hash`.
+ *
+ * `POST` e não `PUT`: emitir substitui o token anterior, e chamar duas vezes
+ * gera dois tokens diferentes. Um `PUT` idempotente aqui esconderia isso.
+ */
+projectsApp.post('/:projectId/scim-token', somenteNess, async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const projeto = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(projectId).first();
+    if (!projeto) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    const token = `scim_${genToken()}${genToken()}`;
+    const ator = c.get('user')?.email ?? 'system';
+
+    await c.env.DB.prepare(
+      `INSERT INTO project_scim (project_id, token_hash, ativo, criado_em, criado_por)
+       VALUES (?, ?, 1, datetime('now'), ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         token_hash = excluded.token_hash, ativo = 1,
+         criado_em = excluded.criado_em, criado_por = excluded.criado_por, ultimo_uso_em = NULL`
+    ).bind(projectId, await sha256Hex(token), ator).run();
+
+    await logAudit(
+      c.env.DB, 'project.scim_token_issued', ator,
+      `Token SCIM emitido para o projeto ${projectId} (o anterior, se havia, deixou de valer)`,
+      '', '', projectId
+    );
+
+    return c.json({
+      ok: true,
+      token,
+      base_url: `${new URL(c.req.url).origin}/scim/v2`,
+      aviso: 'Guarde agora: o token não é mostrado de novo. Emitir outro invalida este.',
+    }, 201);
+  } catch (e: any) {
+    return erro500(c, 'Falha ao emitir o token SCIM', e);
+  }
+});
 
 /**
  * Configuração de SSO deste cliente (item 4.1 do plano).

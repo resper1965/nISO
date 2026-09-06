@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS users (
     -- Contador atômico de tentativas do segundo fator (balde de 5 min).
     totp_fail_count INTEGER DEFAULT 0,
     totp_fail_window INTEGER,
+    -- Desprovisionamento por SCIM (migration 0028). Conta desativada CONTINUA
+    -- existindo — a trilha referencia o e-mail dela, e apagar reescreveria o
+    -- passado — mas não autentica. DEFAULT 1: nada muda para quem já existe.
+    ativo INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -247,6 +251,19 @@ BEFORE DELETE ON audit_logs
 BEGIN
   SELECT RAISE(ABORT, 'audit_logs is append-only');
 END;
+
+-- SCIM 2.0 (migration 0028): o token que o IdP do cliente usa para provisionar e
+-- desprovisionar. Guardado como HASH — quem tem acesso ao banco não deve
+-- conseguir se passar pelo IdP do cliente.
+CREATE TABLE IF NOT EXISTS project_scim (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    token_hash TEXT NOT NULL,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    criado_por TEXT,
+    ultimo_uso_em DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_project_scim_token ON project_scim(token_hash);
 
 -- SSO por OIDC, por tenant (migration 0027). Tabela vazia = nenhum tenant usa
 -- SSO, e o login por senha segue sendo o único caminho. `client_secret` é

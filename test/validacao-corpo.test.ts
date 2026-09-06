@@ -228,6 +228,21 @@ describe('Catraca de leituras de corpo sem schema', () => {
   /** 53 no levantamento inicial; 45 depois de senha/escopo/rotas públicas; 40 depois dos PUT dos módulos. */
   const TETO = 40;
 
+  /**
+   * Arquivos dispensados da catraca, com o motivo — não um número inflado.
+   *
+   * `scim.ts` fala SCIM 2.0, e o corpo vem do IdP do cliente. Entra, Okta e
+   * Google mandam formas diferentes para a mesma operação (o `PATCH` de
+   * desativação tem duas sintaxes válidas na própria RFC), e um schema estrito
+   * faria o desprovisionamento simplesmente não acontecer com metade dos IdPs —
+   * em silêncio, que é o pior modo de falha possível para esse controle. O
+   * handler valida defensivamente o que USA: que `userName` é e-mail, que
+   * `Operations` é array, que o JSON parseia.
+   */
+  const DISPENSADOS: Record<string, string> = {
+    'scim.ts': 'corpo definido pelo IdP (RFC 7644); schema estrito quebraria interoperabilidade',
+  };
+
   it('não cresce', () => {
     const ocorrencias: string[] = [];
     for (const [chave, src] of Object.entries(fontes)) {
@@ -237,6 +252,7 @@ describe('Catraca de leituras de corpo sem schema', () => {
       // primeira ocorrência e é frágil à toa quando o nome já está em mãos.
       const modulo = chave.split('/').pop() ?? chave;
       if (modulo.includes('.test.')) continue;
+      if (modulo in DISPENSADOS) continue;
       const caminho = `src/routes/${modulo}`;
       src.split('\n').forEach((linha, i) => {
         if (/c\.req\.json/.test(linha)) {
@@ -248,6 +264,15 @@ describe('Catraca de leituras de corpo sem schema', () => {
     // Piso além do teto: se o glob parar de casar, a contagem cai para zero e o
     // teste passaria sem ter olhado nada.
     expect(Object.keys(fontes).length, 'o glob de rotas não casou nada').toBeGreaterThan(10);
+
+    // Dispensa órfã é pior que dispensa: dá a impressão de que alguém decidiu
+    // algo sobre um arquivo que já não existe.
+    for (const arquivo of Object.keys(DISPENSADOS)) {
+      expect(
+        Object.keys(fontes).some((k) => k.endsWith(`/${arquivo}`)),
+        `dispensa órfã na catraca: ${arquivo}`
+      ).toBe(true);
+    }
 
     expect(
       ocorrencias.length,

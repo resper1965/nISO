@@ -23,6 +23,7 @@ import { auditsApp, projectAuditsApp } from './routes/audits';
 import { capaApp, projectCapaApp } from './routes/capa';
 import { certificationsApp, projectCertificationsApp } from './routes/certifications';
 import { publicApp } from './routes/public';
+import { scimApp } from './routes/scim';
 import { aiApp } from './routes/ai';
 import { governanceApp } from './routes/governance';
 import { auditorApp } from './routes/auditor';
@@ -206,6 +207,14 @@ app.route('/api/v1/auth', authApp);
 
 // 4. Public sub-router (público)
 app.route('/api/v1/public', publicApp);
+
+/*
+ * SCIM 2.0 (item 4.2). Montado em `/scim/v2/*` — o caminho que a RFC 7644
+ * padroniza e que os IdPs esperam — e ANTES do `authMiddleware` de propósito: o
+ * autenticador ali é um token por tenant, não uma sessão de usuário. Misturar os
+ * dois faria o caminho de sessão carregar um caso que não é dele.
+ */
+app.route('/scim/v2', scimApp);
 
 // 5. Auth Middleware para demais rotas /api/v1
 app.use('/api/v1/*', authMiddleware);
