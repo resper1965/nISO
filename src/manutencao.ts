@@ -1,4 +1,5 @@
 import { log } from './observability';
+import { arquivarDia, diaAtras } from './trilha';
 import type { Bindings } from './index';
 
 /**
@@ -48,6 +49,8 @@ const CARENCIA_TOKEN_AUDITOR_DIAS = 90;
 export type ResultadoManutencao = {
   rate_limits_removidos: number;
   tokens_auditor_removidos: number;
+  /** Dia da trilha arquivado nesta execução, ou null se não houve. */
+  trilha_arquivada: string | null;
   falhas: string[];
 };
 
@@ -60,6 +63,7 @@ export async function manutencaoDiaria(env: Bindings): Promise<ResultadoManutenc
   const resultado: ResultadoManutencao = {
     rate_limits_removidos: 0,
     tokens_auditor_removidos: 0,
+    trilha_arquivada: null,
     falhas: [],
   };
 
@@ -85,6 +89,21 @@ export async function manutencaoDiaria(env: Bindings): Promise<ResultadoManutenc
     resultado.tokens_auditor_removidos = r.meta?.changes ?? 0;
   } catch (e: any) {
     resultado.falhas.push(`auditor_tokens: ${e?.message ?? e}`);
+  }
+
+  /*
+   * Arquiva a trilha de ONTEM, não a de hoje: o dia corrente ainda recebe
+   * registro, e arquivá-lo produziria um objeto incompleto que a idempotência
+   * depois se recusaria a corrigir — a cadeia guardaria um dia truncado para
+   * sempre. Um dia inteiro de atraso é o preço de o arquivo ser definitivo.
+   */
+  try {
+    if ((env as any).TRILHA) {
+      const r = await arquivarDia(env, diaAtras(1));
+      resultado.trilha_arquivada = r.ja_existia ? null : r.dia;
+    }
+  } catch (e: any) {
+    resultado.falhas.push(`trilha: ${e?.message ?? e}`);
   }
 
   log(resultado.falhas.length ? 'error' : 'info', {

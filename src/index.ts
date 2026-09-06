@@ -62,6 +62,8 @@ export type Bindings = {
   RESEND_API_KEY?: string;
   /** Analytics Engine. Opcional: sem o binding, a métrica é ignorada. */
   ANALYTICS?: AnalyticsEngineDataset;
+  /** Bucket da trilha de auditoria arquivada (src/trilha.ts). */
+  TRILHA?: R2Bucket;
 };
 
 export type Variables = {

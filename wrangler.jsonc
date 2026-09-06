@@ -49,6 +49,14 @@
 		{
 			"binding": "STORAGE",
 			"bucket_name": "niso-evidence"
+		},
+		{
+			// Trilha de auditoria arquivada (src/trilha.ts). Bucket SEPARADO do de
+			// evidências de propósito: o ponto do item 4.4 é a trilha viver fora do
+			// alcance de quem administra o banco, e um token com escopo só do
+			// bucket de evidência não deve conseguir reescrevê-la.
+			"binding": "TRILHA",
+			"bucket_name": "niso-trilha"
 		}
 	],
 	"vectorize": [
@@ -125,6 +133,14 @@
 				{
 					"binding": "STORAGE",
 					"bucket_name": "niso-evidence-staging"
+				},
+				{
+					// Em staging aponta para o MESMO bucket de produção? Não: para o
+					// de staging. Trilha de teste encadeada na trilha real quebraria a
+					// cadeia de produção — que é justamente o que ela existe para
+					// detectar.
+					"binding": "TRILHA",
+					"bucket_name": "niso-trilha-staging"
 				}
 			],
 			"ai": {

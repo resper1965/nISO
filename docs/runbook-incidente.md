@@ -164,11 +164,11 @@ npx wrangler d1 execute niso-db --remote --command \
       WHERE actor='alguem@exemplo.com' ORDER BY created_at DESC LIMIT 50;"
    ```
 
-> **Correção de uma afirmação anterior deste runbook.** Ele dizia que
-> `audit_logs` não é imutável e que nada no schema barra `UPDATE`/`DELETE`.
-> Está errado: a migration `0018_data_hardening.sql` cria os triggers
-> `audit_logs_no_update` e `audit_logs_no_delete`, que abortam as duas
-> operações, e eles **estão** no banco de produção — conferido em 2026-09-06:
+> **O que dá e o que não dá para afirmar sobre a trilha.**
+>
+> `audit_logs` é append-only no banco: a migration `0018_data_hardening.sql` cria
+> `audit_logs_no_update` e `audit_logs_no_delete`, e os dois **estão** em
+> produção — conferido em 2026-09-06:
 >
 > ```
 > SELECT name, type FROM sqlite_master WHERE type='trigger';
@@ -176,12 +176,25 @@ npx wrangler d1 execute niso-db --remote --command \
 > → audit_logs_no_delete | trigger
 > ```
 >
-> **O limite que continua valendo**, e que é o que importa declarar num relato:
-> quem tem acesso ao D1 pode `DROP TRIGGER` e então alterar a trilha. Os
-> triggers protegem contra erro de aplicação e contra `UPDATE`/`DELETE` avulso;
-> não protegem contra quem administra o banco. Trilha à prova disso exige cópia
-> fora do D1 (append-only, com retenção própria) — é o item 4.4 do
-> `enterprise-grade-plan.md`, e é só essa parte que segue em aberto.
+> (Uma versão anterior deste runbook dizia o contrário. Estava errada.)
+>
+> Os triggers não param quem administra o banco: `DROP TRIGGER` é uma linha. Por
+> isso o cron diário arquiva o dia FECHADO num objeto JSONL no bucket
+> `niso-trilha`, e cada dia carrega o SHA-256 do anterior. Alterar um dia já
+> arquivado quebra o encadeamento de todos os posteriores.
+>
+> ```bash
+> # Durante um incidente ou uma auditoria, a pergunta é esta:
+> curl -H "Authorization: Bearer <sessao-platform-admin>" \
+>   https://niso.ness.workers.dev/api/v1/admin/trilha/verificar
+> # 200 = cadeia íntegra · 409 = quebra, com o dia e o motivo no corpo
+> ```
+>
+> **O limite que continua valendo, e que é o que se declara num relato:** a
+> cadeia protege contra quem tem acesso ao D1. Ela **não** protege contra quem
+> tem escrita no bucket E no banco ao mesmo tempo, nem cobre o DIA CORRENTE, que
+> ainda só existe no D1. Fechar isso exige destino que o próprio produto não
+> possa reescrever — bucket com retenção/object-lock, ou terceiro depositário.
 
 ## 7. Comunicar
 
