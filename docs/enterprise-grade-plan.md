@@ -162,12 +162,12 @@ Fecha o eixo 2. É a onda que um auditor de certificação vai pedir para ver.
 
 ### Achados da onda 1 ainda em aberto
 
-O A2 foi corrigido depois (ver abaixo). O A1 segue aberto: exige migration, e
-mexer no vínculo cliente↔lead sem staging onde ensaiar é o que a onda 2 evita.
+Os três foram corrigidos depois — o A1 sem a migration que este documento
+previa, porque a previsão estava errada (ver a linha dele).
 
 | # | Achado | Encaminhamento |
 |---|---|---|
-| A1 | `/api/v1/client/assessment` e `/api/v1/client/proposal` estão **mortas**: as duas exigem `user.client_lead_id`, coluna que não existe em `schema.sql` nem em nenhuma das 25 migrations, e que o login não seleciona. O comentário que justifica o `somenteNess` em `routes/proposals.ts` afirma que esse é "o caminho legítimo do cliente para a própria proposta" — hoje o cliente não alcança a própria proposta por caminho nenhum | Precisa de migration + `SELECT` no login + quem grava o vínculo. `test/platform-portfolio.test.ts` fixa o 404 atual e FALHA quando a coluna aparecer, forçando revisitar o comentário no mesmo commit |
+| A1 | ~~`/api/v1/client/assessment` e `/api/v1/client/proposal` estão **mortas**~~ **corrigido, e sem migration** | O encaminhamento anterior dizia "precisa de migration + SELECT no login + quem grava o vínculo". Estava errado: o vínculo **já existe** no banco. `POST /assessments/:id/convert` grava `projects.assessment_id`, e as duas rotas que criam proposta gravam `proposals.assessment_id` — o caminho é `users.client_project_id → projects.assessment_id → assessments.id ↳ proposals.assessment_id`. Criar `users.client_lead_id` seria um terceiro lugar guardando o mesmo vínculo, livre para divergir. O isolamento sai de graça: o filtro é o projeto do próprio usuário, sem id vindo do chamador. O comentário mentiroso do `proposals.ts` foi corrigido no mesmo commit |
 | A2 | ~~`GET /api/v1/policies/templates/:templateName` devolve **500** para nome inexistente~~ **corrigido** | O bloqueio era o binding `ASSETS` ausente no teste; resolvido apontando o `wrangler.test.jsonc` para `src` (onde os templates moram), e não para `frontend/dist` — que amarraria a suíte a um build prévio. `generate()` passou a lançar `TemplateNaoEncontrado`, e só esse tipo vira 404: 5xx do ASSETS continua 500, porque aí a falha é nossa |
 | A3 | **NOVO, achado ao fechar o A2** — o catálogo `listAvailableTemplates()` anunciava `soa-template`, arquivo que **nunca existiu**: o consultor clicava e recebia erro. E omitia `risk-policy` e `vendor-risk-assessment`, que existem e ficavam invisíveis. Havia teste afirmando que a lista contém `soa-template` — ele pinava a falha em vez de pegá-la | Catálogo corrigido para o que existe; `test/policies-templates.test.ts` busca CADA nome pelo ASSETS real e falha se algum não voltar 200. Falta o conteúdo: **não há template de Declaração de Aplicabilidade (SoA)**, que é documento central da ISO 27001 — lacuna de produto, no eixo de conteúdo, não de código |
 
