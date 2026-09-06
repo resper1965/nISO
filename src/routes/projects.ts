@@ -7,14 +7,88 @@ import { MigrationService } from '../services/migration-service';
 import { seedPhases } from '../services/project-setup';
 import { controlsForRole, ISO_27701_2025_STANDARD } from '../data/iso27701-2025';
 import { checkCoherence } from '../services/coherence';
-import { validateBody, projectPhaseSchema, interviewSchema, evidenceMetaSchema, scopeChangeSchema, auditorTokenSchema, politicaTenantSchema } from '../schemas';
+import { validateBody, projectPhaseSchema, interviewSchema, evidenceMetaSchema, scopeChangeSchema, auditorTokenSchema, politicaTenantSchema, ssoConfigSchema } from '../schemas';
 import { registerAssetRoutes } from './project-assets';
 import { encryptSecret, decryptSecret, isEncrypted } from '../secret-crypto';
 import { COLUNAS_REVOGACAO } from './controls';
 import { exportarProjeto } from '../portabilidade';
 import { ipPermitido } from '../politica-tenant';
+import { papelValidoParaSso } from '../sso';
 
 export const projectsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+/**
+ * Configuração de SSO deste cliente (item 4.1 do plano).
+ *
+ * Escrita restrita à ness., pelo mesmo motivo da política de segurança: quem
+ * controla o `issuer` controla quem entra. Um `org_admin` que pudesse apontar o
+ * SSO do próprio tenant para um IdP escolhido por ele passaria a poder emitir
+ * tokens para qualquer e-mail daquele domínio.
+ *
+ * O `client_secret` NUNCA volta na leitura — nem mascarado com os últimos
+ * dígitos. Segredo de IdP não tem por que ser lido de volta por ninguém: quem
+ * precisa dele é o Worker, que o decifra na hora do login.
+ */
+projectsApp.get('/:projectId/sso', somenteNess, async (c) => {
+  try {
+    const p = await c.env.DB.prepare(
+      'SELECT project_id, issuer, client_id, dominios, papel_padrao, ativo, atualizado_em, atualizado_por FROM project_sso WHERE project_id = ?'
+    ).bind(c.req.param('projectId')).first();
+    return c.json({ ok: true, sso: p ?? null });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao ler a configuração de SSO', e);
+  }
+});
+
+projectsApp.put('/:projectId/sso', somenteNess, async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const v = await validateBody(c, ssoConfigSchema);
+    if (!v.success) return v.response;
+    const body = v.data as any;
+
+    const projeto = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(projectId).first();
+    if (!projeto) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    // Papel de staff atribuído por provisionamento automático transformaria
+    // "quem tem e-mail do domínio" em "quem administra a plataforma".
+    if (!papelValidoParaSso(body.papel_padrao)) {
+      return c.json({ error: `papel_padrao não pode ser papel de plataforma: ${body.papel_padrao}` }, 400);
+    }
+
+    const chaveCripto = (c.env as any).TOKEN_ENC_KEY as string | undefined;
+    if (!chaveCripto) {
+      // Recusar é a decisão certa: gravar segredo de IdP em texto claro seria
+      // pior que não ter SSO.
+      return c.json({ error: 'TOKEN_ENC_KEY não configurada — o client_secret não pode ser gravado em claro.' }, 503);
+    }
+    const cifrado = await encryptSecret(body.client_secret, chaveCripto);
+
+    const ator = c.get('user')?.email ?? 'system';
+    await c.env.DB.prepare(
+      `INSERT INTO project_sso (project_id, issuer, client_id, client_secret, dominios, papel_padrao, ativo, atualizado_em, atualizado_por)
+       VALUES (?,?,?,?,?,?,?, datetime('now'), ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         issuer = excluded.issuer, client_id = excluded.client_id, client_secret = excluded.client_secret,
+         dominios = excluded.dominios, papel_padrao = excluded.papel_padrao, ativo = excluded.ativo,
+         atualizado_em = excluded.atualizado_em, atualizado_por = excluded.atualizado_por`
+    ).bind(
+      projectId, body.issuer, body.client_id, cifrado,
+      body.dominios.split(',').map((d: string) => d.trim().toLowerCase()).filter(Boolean).join(','),
+      body.papel_padrao, body.ativo ? 1 : 0, ator
+    ).run();
+
+    await logAudit(
+      c.env.DB, 'project.sso_updated', ator,
+      `SSO do projeto ${projectId}: issuer=${body.issuer}, dominios=${body.dominios}, ativo=${body.ativo ? 1 : 0}`,
+      '', '', projectId
+    );
+
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao gravar a configuração de SSO', e);
+  }
+});
 
 /**
  * Política de segurança DESTE cliente (item 4.3 do plano).

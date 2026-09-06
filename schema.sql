@@ -248,6 +248,23 @@ BEGIN
   SELECT RAISE(ABORT, 'audit_logs is append-only');
 END;
 
+-- SSO por OIDC, por tenant (migration 0027). Tabela vazia = nenhum tenant usa
+-- SSO, e o login por senha segue sendo o único caminho. `client_secret` é
+-- gravado cifrado (src/secret-crypto.ts).
+CREATE TABLE IF NOT EXISTS project_sso (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    issuer TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_secret TEXT NOT NULL,
+    dominios TEXT NOT NULL,
+    papel_padrao TEXT NOT NULL DEFAULT 'org_user',
+    ativo INTEGER NOT NULL DEFAULT 0,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_por TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_sso_ativo ON project_sso(ativo);
+
 -- Política de segurança por tenant (migration 0026). Tabela vazia significa
 -- "todo mundo na postura padrão da plataforma": ausência de linha nunca é
 -- interpretada como restrição.
