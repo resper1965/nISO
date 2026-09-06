@@ -27,6 +27,7 @@ import { aiApp } from './routes/ai';
 import { governanceApp } from './routes/governance';
 import { auditorApp } from './routes/auditor';
 import { platformApp } from './routes/platform';
+import { documentoOpenApi } from './openapi';
 import { mfaApp } from './routes/mfa';
 import { dataSubjectApp } from './routes/data-subject';
 
@@ -259,6 +260,19 @@ app.route('/api/v1', aiApp);
 app.route('/api/v1', governanceApp);
 app.route('/api/v1', auditorApp);
 app.route('/api/v1', platformApp);
+
+/*
+ * Contrato da API (item 3.1 do enterprise-grade-plan.md).
+ *
+ * Montado AQUI, depois do `authMiddleware`, e não junto do `/health`: exige
+ * sessão. Um OpenAPI público é o normal em API aberta; esta não é. O documento
+ * enumera caminho, método e a forma exata de cada corpo aceito — é mapa de
+ * superfície de ataque, e entregá-lo a quem não autenticou não compra nada.
+ * Quem consome (o mcp-server-niso) já autentica.
+ *
+ * `origem` sai da própria requisição para o `servers` não mentir em staging.
+ */
+app.get('/api/v1/openapi.json', (c) => c.json(documentoOpenApi(new URL(c.req.url).origin)));
 
 
 app.route('', risks);
