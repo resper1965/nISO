@@ -139,6 +139,30 @@ describe('SCIM 2.0', () => {
       expect(results).toHaveLength(1);
     });
 
+    it('conta criada por SCIM NUNCA recebe papel de plataforma', async () => {
+      // O invariante que estava só num comentário — e num `Set` que o código
+      // nunca consultava, dead code que lia como guarda. Aqui ele é conferido:
+      // quem chama é o IdP do CLIENTE, e deixá-lo escolher o papel seria
+      // deixar o cliente decidir o próprio nível de acesso na plataforma.
+      const res = await scim('/Users', TOKEN_A, {
+        method: 'POST',
+        body: JSON.stringify({
+          userName: 'tentativa@a.com',
+          displayName: 'Tentativa',
+          // O IdP manda o que quiser; nada disso pode virar papel.
+          role: 'platform_admin',
+          roles: [{ value: 'platform_admin' }],
+          'urn:ietf:params:scim:schemas:extension:enterprise:2.0:User': { department: 'admin' },
+        }),
+      });
+      expect(res.status).toBe(201);
+
+      const linha = await env.DB.prepare('SELECT role, client_project_id FROM users WHERE email = ?')
+        .bind('tentativa@a.com').first<any>();
+      expect(linha.role, 'o IdP do cliente escolheu o próprio papel').toBe('org_user');
+      expect(linha.client_project_id).toBe(A);
+    });
+
     it('userName que não é e-mail é recusado', async () => {
       const res = await scim('/Users', TOKEN_A, { method: 'POST', body: JSON.stringify({ userName: 'fulano' }) });
       expect(res.status).toBe(400);

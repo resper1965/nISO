@@ -38,8 +38,21 @@ const ESQUEMA_LISTA = 'urn:ietf:params:scim:api:messages:2.0:ListResponse';
 const ESQUEMA_ERRO = 'urn:ietf:params:scim:api:messages:2.0:Error';
 const ESQUEMA_PATCH = 'urn:ietf:params:scim:api:messages:2.0:PatchOp';
 
-/** Papéis que o SCIM NUNCA atribui, pelo mesmo motivo do SSO. */
-const PAPEIS_PROIBIDOS = new Set(['consultor', 'consultant', 'platform_admin', 'admin']);
+/**
+ * Papel dado a toda conta provisionada por SCIM.
+ *
+ * FIXO, e não configurável por tenant. O SSO tem `papel_padrao` porque lá a
+ * escolha é feita pela ness. ao configurar o IdP; aqui quem chama é o IdP do
+ * cliente, e deixá-lo escolher o papel seria deixar o cliente decidir o próprio
+ * nível de acesso na plataforma.
+ *
+ * Uma versão anterior deste arquivo tinha um `Set` de papéis proibidos que nunca
+ * era consultado — dead code que LIA como guarda, e que o CodeQL pegou. Um
+ * `Set` não usado é pior que nenhum: quem revisa conclui que existe validação.
+ * O que garante o invariante agora é o valor literal aqui e o teste
+ * "conta criada por SCIM nunca recebe papel de plataforma".
+ */
+const PAPEL_PROVISIONADO = 'org_user';
 
 type LinhaUsuario = {
   id: string;
@@ -217,7 +230,7 @@ scimApp.post('/Users', async (c) => {
     await c.env.DB.prepare(
       `INSERT INTO users (id, email, password_hash, name, role, client_project_id, ativo)
        VALUES (?,?,?,?,?,?,?)`
-    ).bind(id, email, 'scim:sem-senha-local', nome, 'org_user', projectId, corpo.active === false ? 0 : 1).run();
+    ).bind(id, email, 'scim:sem-senha-local', nome, PAPEL_PROVISIONADO, projectId, corpo.active === false ? 0 : 1).run();
 
     await logAudit(c.env.DB, 'scim.user_created', `scim:${projectId}`, `Conta ${email} provisionada por SCIM`, '', '', projectId);
 
