@@ -381,3 +381,19 @@ export const identificadorSchema = z.object({
   identificador: z.string().trim().min(1).max(320),
   justificativa: z.string().trim().min(1).max(2000),
 }).passthrough();
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  POLÍTICA DE SEGURANÇA POR TENANT (item 4.3)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * O `sessao_ttl_seg` tem PISO de 5 minutos: um TTL de poucos segundos, digitado
+ * por engano, expulsaria todo mundo do cliente a cada requisição, e o caminho de
+ * conserto passa por uma sessão. O teto de 24h é o máximo da plataforma — a
+ * política aperta, nunca afrouxa.
+ */
+export const politicaTenantSchema = z.object({
+  mfa_obrigatorio: z.coerce.boolean().optional(),
+  sessao_ttl_seg: z.coerce.number().int().min(300, 'TTL mínimo é 300 s').max(86400, 'TTL máximo é 86400 s').nullish(),
+  ip_allowlist: z.string().max(2000).nullish(),
+}).passthrough();

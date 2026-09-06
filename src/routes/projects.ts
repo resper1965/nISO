@@ -1,19 +1,108 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
-import { genId, genToken, logAudit, validateUpload, erro500 } from '../helpers';
+import { genId, genToken, logAudit, validateUpload, erro500, somenteNess } from '../helpers';
 import { PHASE_TITLES, PHASE_CHECKLISTS } from '../constants';
 import { MigrationService } from '../services/migration-service';
 import { seedPhases } from '../services/project-setup';
 import { controlsForRole, ISO_27701_2025_STANDARD } from '../data/iso27701-2025';
 import { checkCoherence } from '../services/coherence';
-import { validateBody, projectPhaseSchema, interviewSchema, evidenceMetaSchema, scopeChangeSchema, auditorTokenSchema } from '../schemas';
+import { validateBody, projectPhaseSchema, interviewSchema, evidenceMetaSchema, scopeChangeSchema, auditorTokenSchema, politicaTenantSchema } from '../schemas';
 import { registerAssetRoutes } from './project-assets';
 import { encryptSecret, decryptSecret, isEncrypted } from '../secret-crypto';
 import { COLUNAS_REVOGACAO } from './controls';
 import { exportarProjeto } from '../portabilidade';
+import { ipPermitido } from '../politica-tenant';
 
 export const projectsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+/**
+ * Política de segurança DESTE cliente (item 4.3 do plano).
+ *
+ * Leitura e escrita sob `/:projectId/`, então o `projectAccessMiddleware` já
+ * garante que ninguém lê nem escreve a política do vizinho.
+ *
+ * A escrita é restrita à equipe ness. de propósito, e é uma decisão de produto
+ * defensável nos dois sentidos: apertar a própria política é um pedido legítimo
+ * do cliente, mas AFROUXÁ-LA de dentro tornaria o controle inútil — quem
+ * conseguisse uma sessão de `org_admin` desligaria a exigência de MFA que existe
+ * justamente para impedir esse cenário. Enquanto não há um fluxo de aprovação, o
+ * pedido passa pela ness.
+ */
+projectsApp.get('/:projectId/security-policy', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const p = await c.env.DB.prepare(
+      'SELECT project_id, mfa_obrigatorio, sessao_ttl_seg, ip_allowlist, updated_at, updated_by FROM project_security_policy WHERE project_id = ?'
+    ).bind(projectId).first();
+    // Sem linha, devolve a postura padrão explicitamente em vez de 404: "não há
+    // política" é uma resposta, e a interface precisa dela para desenhar a tela.
+    return c.json({
+      ok: true,
+      politica: p ?? {
+        project_id: projectId,
+        mfa_obrigatorio: 0,
+        sessao_ttl_seg: null,
+        ip_allowlist: null,
+        padrao_da_plataforma: true,
+      },
+    });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao ler a política de segurança', e);
+  }
+});
+
+projectsApp.put('/:projectId/security-policy', somenteNess, async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const v = await validateBody(c, politicaTenantSchema);
+    if (!v.success) return v.response;
+    const body = v.data as any;
+
+    const projeto = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(projectId).first();
+    if (!projeto) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    // Uma allowlist que não casa com nada tranca o cliente inteiro para fora, e
+    // o conserto exige justamente o acesso que ela nega. Recusar entrada
+    // malformada AQUI é mais barato que descobrir depois.
+    const entradas = (body.ip_allowlist ?? '').split(',').map((x: string) => x.trim()).filter(Boolean);
+    const invalidas = entradas.filter((e: string) => !ipPermitido(e.split('/')[0], e));
+    if (invalidas.length) {
+      return c.json(
+        { error: `Entradas inválidas na allowlist (aceita IPv4 e CIDR IPv4): ${invalidas.join(', ')}` },
+        400
+      );
+    }
+
+    const ator = c.get('user')?.email ?? 'system';
+    await c.env.DB.prepare(
+      `INSERT INTO project_security_policy (project_id, mfa_obrigatorio, sessao_ttl_seg, ip_allowlist, updated_at, updated_by)
+       VALUES (?, ?, ?, ?, datetime('now'), ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         mfa_obrigatorio = excluded.mfa_obrigatorio,
+         sessao_ttl_seg = excluded.sessao_ttl_seg,
+         ip_allowlist = excluded.ip_allowlist,
+         updated_at = excluded.updated_at,
+         updated_by = excluded.updated_by`
+    ).bind(
+      projectId,
+      body.mfa_obrigatorio ? 1 : 0,
+      body.sessao_ttl_seg ?? null,
+      entradas.length ? entradas.join(',') : null,
+      ator
+    ).run();
+
+    await logAudit(
+      c.env.DB, 'project.security_policy_updated', ator,
+      `Política de segurança do projeto ${projectId}: mfa=${body.mfa_obrigatorio ? 1 : 0}, ttl=${body.sessao_ttl_seg ?? 'padrão'}, ips=${entradas.length}`,
+      '', '', projectId
+    );
+
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao gravar a política de segurança', e);
+  }
+});
 
 /**
  * Portabilidade: o cliente inteiro, num arquivo (item 4.6 do plano; LGPD art.

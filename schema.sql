@@ -248,6 +248,18 @@ BEGIN
   SELECT RAISE(ABORT, 'audit_logs is append-only');
 END;
 
+-- Política de segurança por tenant (migration 0026). Tabela vazia significa
+-- "todo mundo na postura padrão da plataforma": ausência de linha nunca é
+-- interpretada como restrição.
+CREATE TABLE IF NOT EXISTS project_security_policy (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    mfa_obrigatorio INTEGER NOT NULL DEFAULT 0,
+    sessao_ttl_seg INTEGER,
+    ip_allowlist TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,

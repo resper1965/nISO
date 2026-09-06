@@ -59,6 +59,7 @@ export const ROTAS = {
   'PUT /api/v1/projects/{id}/context': { obrigatorios: [] },
   'PUT /api/v1/projects/{id}/documents/{docId}': { obrigatorios: [] },
   'PUT /api/v1/projects/{id}/phases/{num}': { obrigatorios: [] },
+  'PUT /api/v1/projects/{projectId}/security-policy': { obrigatorios: [] },
   'PUT /api/v1/proposals/{id}': { obrigatorios: [] },
   'PUT /api/v1/risks/{id}': { obrigatorios: ['asset', 'threat'] },
   'PUT /api/v1/ropa/{id}': { obrigatorios: ['processing_purpose'] },
