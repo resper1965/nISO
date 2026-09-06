@@ -175,9 +175,9 @@ mexer no vínculo cliente↔lead sem staging onde ensaiar é o que a onda 2 evit
 
 | # | Ação | Critério de saída |
 |---|---|---|
-| 2.1 | Ambiente `staging` no `wrangler.jsonc` (D1, KV, R2 e Vectorize próprios) | `wrangler deploy --env staging` publica; produção intocada |
-| 2.2 | Deploy em dois passos: `main` → staging → aprovação → produção | workflow com `environment: staging` antes de `production` |
-| 2.3 | Migration ensaiada em staging antes de produção | passo do `db-migrate.yml` que aplica em staging primeiro |
+| 2.1 | Ambiente `staging` no `wrangler.jsonc` — **PARCIAL** | `env.staging` escrito; D1 `niso-db-staging` **criado**. Faltam KV e R2: os comandos que os criam foram recusados neste ambiente, e criar recurso na conta do cliente não se faz às cegas. Os dois comandos estão em `docs/staging.md`. Sem Vectorize por decisão declarada — apontar staging para o índice de produção faria ingestão de teste gravar vetor no índice do cliente |
+| 2.2 | Deploy em dois passos — **escrito, inativo** | Job `staging` em `deploy.yml` roda antes de `deploy`, com sonda de fumaça. Gate: variável de repositório `STAGING_ATIVO`. Enquanto ela não for `true` o job é PULADO e produção segue como antes — um gate que não pode passar pararia toda a entrega |
+| 2.3 | Migration ensaiada em staging — **escrito, inativo** | Passo `Ensaiar migrations em staging` no `db-migrate.yml`, antes do apply de produção, sob o mesmo gate. Quando pulado, emite `::warning::` dizendo que a migration vai sem ensaio |
 | 2.4a | ~~Handler `scheduled` + cron trigger~~ **feito** | `src/manutencao.ts` + `triggers.crons` no `wrangler.jsonc`: purga de `rate_limits` e de token de auditor vencido. É a PRIMEIRA execução periódica do sistema |
 | 2.4b | ~~Backup diário verificado~~ **feito** | `.github/workflows/db-backup.yml`, agendado, com verificação do dump e issue automática se falhar |
 | 2.5 | ~~Runbook de incidente~~ **feito** | `docs/runbook-incidente.md`: sonda, reverter deploy, restaurar D1, migration ruim, MFA perdido, acesso indevido, comunicar |
@@ -202,7 +202,7 @@ Os itens 2.4 e 2.5 não exigem infraestrutura nova e estão feitos. Os itens
 | 3.3 | Fechar as ~46 leituras de corpo sem schema semântico | nenhum `c.req.json()` sem `validateBody` em rota de escrita |
 | 3.4 | Reduzir `any` — começando por `middleware/`, `auth.ts`, `helpers.ts` | zero `any` nos caminhos de autorização |
 | 3.5 | SLO + alerta consumindo Analytics Engine | alerta dispara em taxa de erro 5xx e em p95 de latência |
-| 3.6 | Verificação externa de disponibilidade | uptime check no domínio de produção, notificando fora do GitHub |
+| 3.6 | Verificação externa de disponibilidade — **PARCIAL** | `.github/workflows/uptime.yml`: sonda a cada 15 min, de fora da Cloudflare, com as duas checagens da seção 0 do runbook (`/health` e o envelope de validação do login). Abre issue única `uptime` e fecha sozinha ao voltar. **Não** cumpre o "notificando fora do GitHub", e a latência de detecção é de dezenas de minutos porque o schedule do Actions atrasa por fila — melhor que "ninguém vê", pior que monitoramento de verdade |
 
 ### Onda 4 — Enterprise de verdade
 
