@@ -220,7 +220,7 @@ padrão do Spec Kit antes do código.
 | 4.3 | Política de segurança por tenant | MFA obrigatório, TTL de sessão e allowlist de IP configuráveis por cliente |
 | 4.4 | `audit_logs` imutável — **parte já existe** | Os triggers `audit_logs_no_update`/`audit_logs_no_delete` (migration `0018_data_hardening.sql`) barram as duas operações e **estão em produção** (conferido em 2026-09-06 via `sqlite_master`). O `runbook-incidente.md` afirmava o contrário e foi corrigido. O que falta é o degrau seguinte: quem tem acesso ao D1 pode `DROP TRIGGER` — trilha à prova disso exige cópia append-only fora do D1, com retenção própria |
 | 4.5 | Retenção de trilha e evidência | política declarada, executada pelo cron da onda 2 |
-| 4.6 | Portabilidade do tenant | export assinado do cliente inteiro (LGPD art. 18, V) |
+| 4.6 | ~~Portabilidade do tenant~~ **feito** | `GET /api/v1/projects/:projectId/export`. Tabelas descobertas do BANCO (`sqlite_master` + `PRAGMA`), não de lista — export incompleto é pior que nenhum, porque parece completo, e há teste que cria tabela em tempo de execução para provar que ela entra. Credenciais (`api_keys`, `auditor_tokens`) ficam de fora por decisão explícita. `sha256` sempre; HMAC quando `EXPORT_SIGNING_KEY` existir, com o motivo escrito no manifesto quando não. Isolamento pelo `projectAccessMiddleware`, com teste de vizinho. Ver `docs/portabilidade.md` |
 
 ---
 

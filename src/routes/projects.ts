@@ -11,8 +11,58 @@ import { validateBody, projectPhaseSchema, interviewSchema, evidenceMetaSchema, 
 import { registerAssetRoutes } from './project-assets';
 import { encryptSecret, decryptSecret, isEncrypted } from '../secret-crypto';
 import { COLUNAS_REVOGACAO } from './controls';
+import { exportarProjeto } from '../portabilidade';
 
 export const projectsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+/**
+ * Portabilidade: o cliente inteiro, num arquivo (item 4.6 do plano; LGPD art.
+ * 18, V).
+ *
+ * A guarda de tenant é o `projectAccessMiddleware`, e o que a ativa é a FORMA DA
+ * URL, não o nome do parâmetro aqui: o `index.ts` registra
+ * `app.use('/api/v1/projects/:projectId/*', ...)`, que casa com
+ * `/api/v1/projects/<qualquer>/<algo>`. Verificado por mutação — renomear este
+ * parâmetro para `:id` mantém o 403 ao vizinho. (Uma versão anterior deste
+ * comentário afirmava o contrário; a mutação desmentiu.)
+ *
+ * O que o nome faz é ficar coerente com o que o middleware lê. E o detalhe que
+ * importa de verdade: o `/*` exige um segmento DEPOIS do id, então
+ * `GET /api/v1/projects/:id` — sem sufixo — NÃO passa pelo middleware e tem
+ * guarda própria no handler. Rota nova sob projeto que não tenha sufixo precisa
+ * lembrar disso.
+ *
+ * `somenteNess` NÃO é usado: o dado é do cliente, e o direito de levá-lo é dele.
+ * O papel read-only (`org_user`, `client`) alcança porque é GET.
+ */
+projectsApp.get('/:projectId/export', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const projeto = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(projectId).first();
+    if (!projeto) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    const conteudo = await exportarProjeto(c.env, projectId);
+
+    await logAudit(
+      c.env.DB,
+      'project.exported',
+      c.get('user')?.email ?? 'system',
+      `Export de portabilidade do projeto ${projectId}: ${conteudo.manifesto.total_linhas} linhas`,
+      '', '', projectId
+    );
+
+    // `Content-Disposition`: o arquivo é para SAIR do produto — abrir como texto
+    // no navegador é o comportamento errado para um export de portabilidade.
+    return new Response(JSON.stringify(conteudo, null, 2), {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="niso-export-${projectId}-${conteudo.manifesto.gerado_em.slice(0, 10)}.json"`,
+      },
+    });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao exportar o projeto', e);
+  }
+});
 
 // NUNCA devolver credenciais no corpo. `repository_token` é secret (uso só
 // server-side); redigido aqui — o cliente recebe apenas um booleano indicando se
