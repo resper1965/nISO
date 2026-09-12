@@ -46,6 +46,9 @@ export type Bindings = {
   STORAGE: R2Bucket;
   AI: Ai;
   SETUP_KEY?: string;
+  /** Segredo do desafio anti-abuso do login. Sem ele o desafio não é exigido
+      nem anunciado; o bloqueio temporário continua valendo. */
+  TURNSTILE_SECRET_KEY?: string;
   ENVIRONMENT?: string;
   ASSETS?: Fetcher;
   /** Conta/gateway do AI Gateway (opcionais: há default em agents/types.ts).

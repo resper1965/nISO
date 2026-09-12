@@ -1,7 +1,10 @@
 import { createMiddleware } from 'hono/factory';
 import { Bindings, Variables } from '../index';
-import { sha256Hex, sessionRevoked } from '../helpers';
-import { apiKeyRoleViolation } from '../auth-policy';
+import { sha256Hex, sessionRevoked, SESSION_TTL_SEC } from '../helpers';
+import { apiKeyRoleViolation, expirouPorInatividade } from '../auth-policy';
+
+/** De quanto em quanto tempo a marca de atividade da sessão é reescrita. */
+const RENOVA_ATIVIDADE_MS = 60 * 1000;
 
 /**
  * Resolve o usuário a partir de uma API key (X-API-Key). Retorna o contexto de
@@ -167,6 +170,31 @@ export const authMiddleware = createMiddleware<{ Bindings: Bindings; Variables: 
     // Guarda o identificador para que /auth/mfa/verify possa reescrever a
     // própria sessão ao confirmar o código.
     c.set('sessionId', sessionId);
+
+    // Expiração por INATIVIDADE, separada do teto absoluto de 24 h: 30 min para
+    // papel de Cliente, 8 h para consultor. Antes só existia o teto, então uma
+    // sessão de cliente aberta num navegador compartilhado seguia válida o dia
+    // inteiro sem ninguém tocar nela.
+    const agora = Date.now();
+    const visto = (user as any).seen ?? (user as any).iat;
+    if (expirouPorInatividade(agora, visto, user.role)) {
+      await c.env.SESSIONS.delete(`session_${sessionId}`);
+      await c.env.SESSIONS.delete(sessionId);
+      return c.json({ error: 'Unauthorized: Session expired due to inactivity', expired: 'inactivity' }, 401);
+    }
+
+    // Renova a marca de atividade, mas só de minuto em minuto: reescrever a
+    // sessão a cada requisição seria uma escrita de KV por chamada de API.
+    // O TTL é o RESTANTE do teto de 24 h, nunca 24 h de novo — renovar o teto
+    // faria a sessão viver para sempre e a revalidação diária nunca chegaria.
+    if (agora - visto > RENOVA_ATIVIDADE_MS) {
+      const restante = Math.floor((SESSION_TTL_SEC * 1000 - (agora - ((user as any).iat ?? agora))) / 1000);
+      if (restante > 60) {
+        const renovada = { ...(user as any), seen: agora };
+        await c.env.SESSIONS.put(`session_${sessionId}`, JSON.stringify(renovada), { expirationTtl: restante });
+        await c.env.SESSIONS.put(sessionId, JSON.stringify(renovada), { expirationTtl: restante });
+      }
+    }
 
     // Legacy role mapping for backward compatibility.
     // Keep consistent with the login handler (routes/auth.ts): 'admin' is a
