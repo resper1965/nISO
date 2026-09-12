@@ -852,6 +852,37 @@ CREATE TABLE IF NOT EXISTS scope_changes (
 CREATE INDEX IF NOT EXISTS idx_scope_changes_project ON scope_changes(project_id);
 
 -- -----------------------------------------------
+-- Documentos legais do n.iso (migration 0024)
+-- -----------------------------------------------
+-- A `classification` é CAMPO DO DOCUMENTO, não julgamento de quem publica: é
+-- ela que decide se uma versão nova apenas avisa ('comum') ou barra o acesso
+-- até o aceite ('material' — mudança de base legal ou de retenção).
+CREATE TABLE IF NOT EXISTS legal_documents (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    version TEXT NOT NULL,
+    classification TEXT NOT NULL CHECK (classification IN ('comum', 'material')),
+    title TEXT NOT NULL,
+    url TEXT,
+    published_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (kind, version)
+);
+CREATE INDEX IF NOT EXISTS idx_legal_documents_kind ON legal_documents(kind, published_at);
+
+-- Data, IP e user-agent: sem os três o registro não prova nada em disputa.
+CREATE TABLE IF NOT EXISTS legal_acceptances (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    document_id TEXT NOT NULL REFERENCES legal_documents(id),
+    accepted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ip TEXT,
+    user_agent TEXT,
+    UNIQUE (user_id, document_id)
+);
+CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user ON legal_acceptances(user_id);
+
+-- -----------------------------------------------
 -- ÍNDICES em colunas quentes (filtros frequentes)
 -- -----------------------------------------------
 CREATE INDEX IF NOT EXISTS idx_evidence_project ON evidence(project_id);

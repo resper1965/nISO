@@ -15,6 +15,7 @@ import { proposalsApp } from './routes/proposals';
 import { assessmentsApp } from './routes/assessments';
 import { projectsApp } from './routes/projects';
 import { controlsApp } from './routes/controls';
+import { legalApp } from './routes/legal';
 import { evidenceApp, projectEvidenceApp } from './routes/evidence';
 import { vendorsApp, projectVendorsApp } from './routes/vendors';
 import { trainingApp, projectTrainingApp } from './routes/training';
@@ -204,6 +205,10 @@ app.route('/api/v1/projects/:projectId/phase-answers', projectPhaseAnswersApp);
 app.route('/api/v1/projects/:projectId/journey-dossier', journeyDossierApp);
 app.route('/api/v1/projects/:projectId/control-adequacao', controlAdequacaoApp);
 app.route('/api/v1/controls', controlsApp);
+// Documentos legais: a rota de pendencia/aceite precisa continuar alcancavel
+// quando ha bloqueio material, senao o usuario barrado nao tem como sair dele
+// (ver legal-policy.ts).
+app.route('/api/v1/legal', legalApp);
 
 app.route('/api/v1/evidence', evidenceApp);
 app.route('/api/v1/projects/:projectId/evidence', projectEvidenceApp);

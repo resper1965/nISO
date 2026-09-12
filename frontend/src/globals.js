@@ -984,6 +984,103 @@ window.loadAll = async function loadAll() {
         }
     }
 
+// ——— Aceite de documentos legais ——————————————————————————————————————
+// Versão nova apenas AVISA quando a mudança é comum, e BARRA o acesso quando é
+// material (base legal ou retenção). Quem decide é a classificação gravada no
+// documento; a tela só obedece.
+
+let legalPendentes = [];
+
+/**
+ * Devolve true quando a entrada foi BARRADA e o cartão de aceite assumiu a
+ * tela. Falha de rede não barra: o servidor recusa com 403 de qualquer forma,
+ * e travar a entrada por indisponibilidade nossa seria pior que deixar passar.
+ */
+window.checkLegalGate = async function checkLegalGate() {
+        let situacao;
+        try {
+            situacao = await api('GET', '/api/v1/legal/pending');
+        } catch (e) {
+            return false;
+        }
+        if (!situacao) return false;
+        legalPendentes = situacao.pendentes || [];
+
+        if (situacao.bloqueia) {
+            renderLegalAcceptCard();
+            return true;
+        }
+        if (situacao.avisa) renderLegalBanner();
+        return false;
+    };
+
+function renderLegalAcceptCard() {
+        const lista = document.getElementById('legal-accept-list');
+        const caixa = document.getElementById('legal-accept-box');
+        if (!lista || !caixa) return;
+
+        lista.innerHTML = legalPendentes.map((d, i) => `
+            <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer">
+                <input type="checkbox" class="legal-check" data-id="${escapeHTML(String(d.id))}"
+                       style="margin-top:3px;accent-color:var(--accent)"
+                       onchange="window.updateLegalAcceptButton()">
+                <span style="font-size:12.5px;color:var(--text-2);line-height:1.5">
+                    Li e aceito ${escapeHTML(d.title)}
+                    <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">${escapeHTML(d.version)}</span>
+                    ${d.url ? `<br><a href="${escapeHTML(d.url)}" target="_blank" rel="noopener" class="login-link">ler o documento</a>` : ''}
+                </span>
+            </label>`).join('');
+
+        ['standard-login-box', 'first-login-reset-box', 'mfa-login-box', 'forgot-password-box']
+            .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+        caixa.style.display = 'flex';
+        document.getElementById('login-overlay').classList.remove('hidden');
+        window.updateLegalAcceptButton();
+    }
+
+/** Aceitar e entrar só habilita com TODOS marcados — aceite parcial não existe. */
+window.updateLegalAcceptButton = function updateLegalAcceptButton() {
+        const caixas = Array.from(document.querySelectorAll('.legal-check'));
+        const btn = document.getElementById('legal-accept-submit');
+        if (!btn) return;
+        const todos = caixas.length > 0 && caixas.every(c => c.checked);
+        btn.disabled = !todos;
+        btn.title = todos ? 'Registra o aceite com data e IP' : 'Marque todos os documentos para continuar';
+    };
+
+window.doAcceptLegal = async function doAcceptLegal() {
+        const ids = Array.from(document.querySelectorAll('.legal-check:checked')).map(c => c.dataset.id);
+        const err = document.getElementById('legal-accept-error');
+        if (err) err.style.display = 'none';
+        try {
+            await api('POST', '/api/v1/legal/accept', { documentIds: ids });
+            document.getElementById('legal-accept-box').style.display = 'none';
+            document.getElementById('standard-login-box').style.display = 'flex';
+            await initApp();
+        } catch (e) {
+            if (err) { err.style.display = 'block'; err.textContent = e.message; }
+        }
+    };
+
+/** Mudança comum: faixa de aviso, sem travar nada. */
+function renderLegalBanner() {
+        if (!legalPendentes.length || document.getElementById('legal-banner')) return;
+        const alvo = document.getElementById('content');
+        if (!alvo || !alvo.parentElement) return;
+        const faixa = document.createElement('div');
+        faixa.id = 'legal-banner';
+        faixa.setAttribute('role', 'status');
+        faixa.style.cssText = 'background:rgba(245,158,11,0.10);border-left:2px solid var(--warning);padding:12px 28px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--text-2)';
+        const nomes = legalPendentes.map(d => `${d.title} ${d.version}`).join(' · ');
+        faixa.innerHTML = `<span style="flex:1;min-width:240px">Documentos atualizados: ${escapeHTML(nomes)}.</span>`;
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-secondary';
+        btn.textContent = 'Ler e aceitar';
+        btn.onclick = () => renderLegalAcceptCard();
+        faixa.appendChild(btn);
+        alvo.parentElement.insertBefore(faixa, alvo);
+    }
+
 window.initApp = async function initApp() {
         // Sprint C: Check for public assessment self-service link
         const assessmentToken = new URLSearchParams(location.search).get('assessment');
@@ -1009,9 +1106,14 @@ window.initApp = async function initApp() {
             return;
         }
 
+        // Pendência legal MATERIAL barra a entrada: o servidor já recusa tudo
+        // com 403, então entrar na aplicação sem aceitar só renderia uma tela
+        // de erro atrás da outra.
+        if (await window.checkLegalGate()) return;
+
         document.getElementById('login-overlay').classList.add('hidden');
         await loadAll();
-        
+
         const isClient = S.user && (S.user.role === 'org_admin' || S.user.role === 'org_user' || S.user.role === 'client');
         if (isClient && S.user.client_project_id) {
             if (S.projects && S.projects.length > 0) {

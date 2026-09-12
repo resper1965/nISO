@@ -106,6 +106,29 @@
                 </div>
             </div>
 
+            <!-- Aceite de documentos legais atualizados. Aparece quando há
+                 pendência MATERIAL: mudança de base legal ou de retenção não
+                 se aceita por omissão. -->
+            <div class="login-box" id="legal-accept-box" style="display:none">
+                <div>
+                    <h2 class="login-title">Documentos atualizados</h2>
+                    <p class="login-lede">Estes documentos mudaram desde o seu último aceite. Leia e confirme para continuar.</p>
+                </div>
+                <div id="legal-accept-list" style="display:flex;flex-direction:column;gap:12px"></div>
+                <button type="button" class="btn btn-primary" id="legal-accept-submit" style="width:100%" disabled
+                        title="Marque os dois documentos para continuar"
+                        onclick="window.doAcceptLegal()">Aceitar e entrar</button>
+                <p id="legal-accept-error" class="login-error" role="alert" style="display:none"></p>
+                <p class="login-note">O aceite é registrado com data e endereço IP.</p>
+                <div style="text-align:center">
+                    <button type="button" class="login-link" onclick="doLogout()">Recusar e sair</button>
+                </div>
+                <div class="login-sign">
+                    <span class="login-sign-house">ness<span>.</span></span>
+                    <span class="login-sign-links">n.iso 1.8.0</span>
+                </div>
+            </div>
+
             <!-- Recuperação de senha -->
             <div class="login-box" id="forgot-password-box" style="display:none">
                 <form onsubmit="return false;" style="display:flex;flex-direction:column;gap:16px">

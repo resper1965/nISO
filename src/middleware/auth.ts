@@ -2,6 +2,7 @@ import { createMiddleware } from 'hono/factory';
 import { Bindings, Variables } from '../index';
 import { sha256Hex, sessionRevoked, SESSION_TTL_SEC } from '../helpers';
 import { apiKeyRoleViolation, expirouPorInatividade } from '../auth-policy';
+import { situacaoLegal, rotaLiberadaComBloqueio } from '../legal-policy';
 
 /** De quanto em quanto tempo a marca de atividade da sessão é reescrita. */
 const RENOVA_ATIVIDADE_MS = 60 * 1000;
@@ -214,6 +215,39 @@ export const authMiddleware = createMiddleware<{ Bindings: Bindings; Variables: 
     else if (user.role === 'user') user.role = 'org_user';
     else if (user.role === 'consultant') user.role = 'consultor';
     else if (user.role === 'client_admin') user.role = 'client';
+  }
+
+  // Documento legal MATERIAL pendente barra o acesso até o aceite — muda base
+  // legal ou retenção, e seguir usando o produto sem aceitar seria tratar o
+  // usuário como se já tivesse concordado. Mudança comum não passa por aqui:
+  // ela apenas rende a faixa de aviso que a tela monta a partir de /pending.
+  //
+  // Só vale para sessão humana: uma API key não tem a quem apresentar o texto,
+  // e barrá-la derrubaria integração por decisão que não é dela.
+  if (!apiKey && !rotaLiberadaComBloqueio(path)) {
+    const docs = await c.env.DB.prepare(
+      `SELECT id, kind, version, classification, title, url, published_at
+         FROM legal_documents WHERE published_at IS NOT NULL`
+    ).all().then(r => (r.results || []).map((d: any) => ({
+      id: d.id, kind: d.kind, version: d.version, classification: d.classification,
+      title: d.title, url: d.url, publishedAt: d.published_at,
+    }))).catch(() => []);
+
+    // Sem documento publicado não há o que aceitar, e o caminho custa uma
+    // consulta vazia. Só busca os aceites quando existe documento.
+    if (docs.length) {
+      const aceitos = await c.env.DB.prepare(
+        'SELECT document_id FROM legal_acceptances WHERE user_id = ?'
+      ).bind((user as any).id).all().then(r => (r.results || []).map((a: any) => a.document_id)).catch(() => []);
+      const situacao = situacaoLegal(docs, aceitos);
+      if (situacao.bloqueia) {
+        return c.json({
+          error: 'É necessário aceitar os documentos atualizados para continuar',
+          legal_acceptance_required: true,
+          pendentes: situacao.pendentes,
+        }, 403);
+      }
+    }
   }
 
   // Global RBAC enforcement for org_user / client roles (aplica a sessões E API keys).

@@ -314,3 +314,23 @@ export const maturitySchema = z.object({
 }).passthrough();
 
 export const statusSchema = z.object({ status: curto }).passthrough();
+
+// ——— Documentos legais ————————————————————————————————————————————————
+// A classificação é enum fechado de propósito: é ela que decide se uma versão
+// nova avisa ou barra o acesso, e um valor livre ali viraria bloqueio por
+// digitação errada (ou a ausência dele, por engano).
+export const legalPublishSchema = z.object({
+  kind: curto,
+  version: curto,
+  classification: z.enum(['comum', 'material']),
+  title: curto,
+  url: curtoOpcional,
+  /** false publica como rascunho: fica fora da conta de pendências. */
+  publish: z.boolean().optional(),
+}).passthrough();
+
+export const legalAcceptSchema = z.object({
+  // Teto baixo porque a tela aceita dois documentos; mil ids num POST é abuso,
+  // não uso.
+  documentIds: z.array(z.string().trim().min(1).max(200)).min(1).max(20),
+}).passthrough();
