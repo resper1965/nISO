@@ -1,22 +1,68 @@
-        :root {
-            --bg: #070b14;
-            --surface: rgba(15, 20, 35, 0.6);
-            --surface-hover: rgba(25, 35, 55, 0.8);
-            --accent: #00ade8;
-            --accent-glow: rgba(0, 173, 232, 0.3);
-            --text: #f5f5f7;
-            /* 0.6 é o valor do design system (design.md §2). Sobre o fundo #070b14
-               isso dá 6.29:1 de contraste (WCAG AA exige 4.5:1); a 0.5 ficava em
-               4.66:1, no limite, e qualquer texto menor já reprovava. */
-            --text-dim: rgba(229, 235, 255, 0.6);
-            --muted: rgba(229, 235, 255, 0.6);
-            --border: rgba(255, 255, 255, 0.08);
-            --success: #22c55e;
-            --warning: #f59e0b;
-            --danger: #ef4444;
-            --glass-blur: blur(24px);
-            color-scheme: dark;
-        }
+/* ============================================================
+   Tokens ness. — base do design system (Industry).
+   Os nomes existentes (--bg, --text, --text-dim, --surface, --border,
+   --accent, --muted, --surface-hover) são preservados: o restante do CSS
+   e das views tem centenas de referências a eles.
+   ============================================================ */
+:root {
+    /* ——— Marca ——— */
+    --accent: #00ade8;            /* BlueDot: accent único do ecossistema */
+    --accent-hover: #008ebf;
+    --accent-active: #007aa3;
+    --accent-dim: rgba(0, 173, 232, 0.12);
+    --accent-ink: #04121c;        /* tinta SOBRE preenchimento ciano — #fff dá 2.6:1 */
+    --accent-glow: rgba(0, 173, 232, 0.3);
+
+    /* ——— Superfícies ———
+       O ground era #070b14 (OLED puro). O guia ness. usa #0b1326 como ground e
+       #162244 para cards: o card se separa do fundo sem precisar de blur. */
+    --bg: #0b1326;                /* ground da página e do header */
+    --surface: #162244;           /* sidebar, cards, popovers, drawer */
+    --surface-2: #1e2d52;         /* hover, tiles, skeleton, toast */
+    --surface-hover: #1e2d52;
+    --border: rgba(255, 255, 255, 0.10);
+
+    /* ——— Tinta ———
+       --text-dim era rgba(229,235,255,.6) ≈ 3.4:1 sobre o card: abaixo do piso
+       de 4.5:1 para texto pequeno. Valores fixos, medidos sobre --surface: */
+    --text: #f1f5f9;              /* 14.8:1 */
+    --text-2: #cbd5e1;            /* 9.6:1  — corpo secundário */
+    --text-dim: #94a3b8;          /* 6.1:1  — rótulos, meta */
+    --text-faint: #8fa0b6;        /* 5.9:1  — MÍNIMO para texto pequeno */
+    --muted: #94a3b8;
+
+    /* ——— Semânticos (paleta ness., não iOS) ——— */
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+    --info: #00ade8;
+
+    /* ——— Tipografia ——— */
+    --font-head: 'Montserrat', system-ui, sans-serif;  /* marca 500 · títulos 600 */
+    --font-body: 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+    /* ——— Geometria: o sistema é quadrado ——— */
+    --radius: 0;
+
+    /* ——— Elevação — sem blur, sem gradiente ——— */
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.45), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+    --glass-blur: none;           /* neutraliza o backdrop-filter herdado */
+
+    /* ——— Motion ——— */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --fast: 150ms;
+    --normal: 200ms;
+    --slow: 300ms;
+
+    /* ——— Métricas do shell (aplicadas na etapa do shell) ——— */
+    --hdr-h: 64px;                /* banda da marca E banda de título: iguais */
+    --side-w: 232px;
+    --side-w-rail: 72px;
+
+    color-scheme: dark;
+}
 
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; display: flex; height: 100vh; font-weight: 300; }
@@ -1103,4 +1149,29 @@ textarea:focus-visible {
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
     }
+}
+
+/* ——— Correções de superfície herdadas ————————————————————————
+   Três coisas saem do sistema: gradiente no item ativo, raio e
+   backdrop-filter. O blur já morreu no token (--glass-blur: none).
+   Precisam vir no fim do arquivo para vencer as regras originais.
+   Os raios inline espalhados pelas views vão a 0 conforme cada tela é
+   revisitada — regra de CSS não vence atributo style. */
+.sidebar-nav.active {
+    background: transparent;
+    border-left-color: var(--accent);
+    box-shadow: inset 2px 0 0 var(--accent);
+    font-weight: 500;
+}
+.sidebar-nav,
+.sidebar-nav.active,
+.btn, .btn-primary, .btn-secondary,
+.chip,
+.form-input, .form-select,
+.stat-card, .card,
+.table-container,
+.toast,
+.badge,
+.modal {
+    border-radius: var(--radius);
 }
