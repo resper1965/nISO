@@ -507,6 +507,48 @@ import { navigate } from '../router.js';
         return { code: controlCode, title: controlTitleText };
     }
 
+    // ——— SoA: aplicabilidade, ordenação e seleção ————————————————————————
+
+    // Piso de qualidade para justificativa NOVA, digitada por pessoa. NÃO é o
+    // critério de bloqueio: a norma exige justificativa, não 40 caracteres. As
+    // justificativas geradas pelo SoALogicEngine são curtas de propósito
+    // ("No software development activities." tem 35) e travar a exportação por
+    // causa delas bloquearia todo projeto já existente sem ganho de conformidade.
+    const MIN_NA_JUSTIFICATION = 40;
+
+    // A numeração do Anexo A é a ordem de leitura do auditor e a ordem do
+    // relatório exportado: A.5.7 vem antes de A.5.15, A.8.2 antes de A.8.11.
+    // Comparação de string inverte as duas e isso é defeito de conteúdo.
+    function compareControlCode(x, y) {
+        const seg = s => String(s || '').split(/[.\-_\s]+/).filter(Boolean)
+            .map(p => (/^\d+$/.test(p) ? Number(p) : p));
+        const A = seg(x), B = seg(y);
+        for (let i = 0; i < Math.max(A.length, B.length); i++) {
+            const p = A[i], q = B[i];
+            if (p === undefined) return -1;
+            if (q === undefined) return 1;
+            if (typeof p === 'number' && typeof q === 'number') {
+                if (p !== q) return p - q;
+            } else if (String(p) !== String(q)) {
+                return String(p) < String(q) ? -1 : 1;
+            }
+        }
+        return 0;
+    }
+
+    function isControlNA(ctrl) {
+        return ctrl.status === 'Not Applicable';
+    }
+
+    // O bloqueio da norma: exclusão de controle sem justificativa registrada.
+    function naSemJustificativa(ctrl) {
+        return isControlNA(ctrl) && !(ctrl.description || '').trim();
+    }
+
+    window.compareControlCode = compareControlCode;
+    window.naSemJustificativa = naSemJustificativa;
+    window.MIN_NA_JUSTIFICATION = MIN_NA_JUSTIFICATION;
+
     async function renderSoA(c, h, a) {
         h.textContent = 'Statement of Applicability (SoA)';
         const proj = S.activeProject || S.projects[0];
@@ -516,9 +558,22 @@ import { navigate } from '../router.js';
             return;
         }
         
-        a.innerHTML = `<button class="btn btn-secondary" onclick="window.runReadinessCheck('${proj.id}')" style="margin-right:8px">Diagnóstico de prontidão</button><button class="btn btn-secondary" onclick="window.generateSoA('${proj.id}')" style="margin-right:8px">Gerar SoA (AI)</button><button class="btn btn-primary" onclick="window.migrate27701('${proj.id}')">Migrar 27701</button>`;
-        c.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--muted)">Carregando controles do SoA...</div>';
-        
+        a.innerHTML = '';
+        // Skeleton nas linhas, não spinner: as colunas já entram dimensionadas,
+        // então a tabela não pula quando os dados chegam.
+        c.innerHTML = `
+            <div style="font-family:var(--font-mono);font-size:10px;text-transform:uppercase;letter-spacing:0.14em;color:var(--text-dim);margin-bottom:14px">carregando controles de ${escapeHTML(proj.project_name || proj.client_name || 'projeto')}…</div>
+            <div class="soa-skeleton">
+                ${Array.from({ length: 8 }, () => `
+                    <div style="display:flex;gap:10px;align-items:center;padding:12px 10px;border-bottom:1px solid var(--border)">
+                        <span class="sk-bar" style="width:74px"></span>
+                        <span class="sk-bar" style="flex:1"></span>
+                        <span class="sk-bar" style="width:116px"></span>
+                        <span class="sk-bar" style="width:66px"></span>
+                        <span class="sk-bar" style="width:118px"></span>
+                    </div>`).join('')}
+            </div>`;
+
         try {
             const [controls, traceData] = await Promise.all([
                 api('GET', `/api/v1/projects/${proj.id}/controls`) || [],
@@ -531,21 +586,39 @@ import { navigate } from '../router.js';
             }
             window.currentSoATraceMap = traceMap;
             window.currentSoAFilter = 'all';
+            window.currentSoAControls = controls;
+            window.currentSoAProjectId = proj.id;
             window.soaAccordionStates = window.soaAccordionStates || {};
+            window.soaSel = new Set();
 
             let totalApplicable = 0, totalNA = 0, totalJustified = 0;
-            
+            const bloqueios = [];
+
             controls.forEach(ctrl => {
-                const isNA = ctrl.status === 'Not Applicable';
-                if (isNA) {
+                if (isControlNA(ctrl)) {
                     totalNA++;
-                    if (ctrl.description && ctrl.description.trim() !== '') {
-                        totalJustified++;
-                    }
+                    if (naSemJustificativa(ctrl)) bloqueios.push(ctrl);
+                    else totalJustified++;
                 } else {
                     totalApplicable++;
                 }
             });
+
+            // Produzir a SoA com exclusão sem justificativa é entregar um
+            // documento que reprova na auditoria. O botão fica desabilitado e o
+            // title diz o motivo; quando libera, o title diz o recorte.
+            // `Gerar SoA (AI)` é a única ação deste repo que produz o documento
+            // — o `Exportar SoA` do protótipo ainda não tem rota.
+            const travado = bloqueios.length > 0;
+            const motivo = travado
+                ? `${bloqueios.length} ${bloqueios.length === 1 ? 'controle N/A está' : 'controles N/A estão'} sem justificativa de exclusão`
+                : `Considera o recorte atual (${controls.length} controles)`;
+            a.innerHTML = `
+                <button class="btn btn-secondary" onclick="window.runReadinessCheck('${proj.id}')" style="margin-right:8px">Diagnóstico de prontidão</button>
+                <button class="btn btn-secondary" onclick="window.migrate27701('${proj.id}')" style="margin-right:8px">Migrar 27701</button>
+                <button class="btn btn-primary" id="soa-generate" title="${escapeHTML(motivo)}"
+                    ${travado ? 'disabled style="cursor:not-allowed;opacity:0.5"' : ''}
+                    onclick="window.generateSoA('${proj.id}')">Gerar SoA (AI)</button>`;
 
             const stdGroups = {};
             controls.forEach(ctrl => {
@@ -562,13 +635,30 @@ import { navigate } from '../router.js';
                 stdGroups[std][sub.code].controls.push(ctrl);
             });
 
+            // Ordem de leitura do auditor dentro de cada seção.
+            Object.values(stdGroups).forEach(subGroups => {
+                Object.values(subGroups).forEach(subData => {
+                    subData.controls.sort((x, y) =>
+                        compareControlCode(parseControlTitle(x).code, parseControlTitle(y).code));
+                });
+            });
+
             const statsHtml = window.renderStatCards([
                 { label: 'Controles Aplicáveis', value: `${totalApplicable} / ${controls.length}`, color: 'var(--accent)', subtext: `${controls.length > 0 ? ((totalApplicable / controls.length) * 100).toFixed(0) : 0}% de cobertura` },
                 { label: 'Controles Não Aplicáveis', value: totalNA, color: 'var(--text-dim)', subtext: 'Exclusões de escopo' },
-                { label: 'Justificativas de Exclusão', value: `${totalJustified} / ${totalNA || 1}`, color: totalNA > 0 && totalJustified === totalNA ? '#34c759' : '#ffcc00', subtext: totalNA > 0 && totalJustified === totalNA ? 'Conforme' : 'Pendente' }
+                { label: 'Justificativas de Exclusão', value: `${totalJustified} / ${totalNA || 1}`, color: travado ? 'var(--danger)' : 'var(--success)', subtext: travado ? 'Pendente' : 'Conforme' }
             ]);
 
+            const faixaBloqueio = travado ? `
+                <div class="soa-block-band" role="alert" style="background:rgba(239,68,68,0.10);border-left:2px solid var(--danger);padding:14px 16px;margin-bottom:1.5rem;display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+                    <span style="flex:1;min-width:240px;font-size:13px;color:var(--text-2);line-height:1.5">
+                        ${escapeHTML(motivo)}. A SoA não pode ser produzida enquanto houver exclusão de escopo sem registro.
+                    </span>
+                    <button class="btn btn-secondary" onclick="window.setSoAFilter('not_applicable')">Ver controles</button>
+                </div>` : '';
+
             let html = `
+                ${faixaBloqueio}
                 ${statsHtml}
 
                 <div class="soa-filters fade-in" style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:2rem;align-items:center;background:rgba(15,20,35,0.4);border:1px solid var(--border);border-radius:12px;padding:16px;backdrop-filter:var(--glass-blur)">
@@ -633,6 +723,7 @@ import { navigate } from '../router.js';
                                     <table class="data-table" style="width:100%; table-layout:fixed">
                                         <thead>
                                             <tr>
+                                                <th style="width:34px"><input type="checkbox" class="soa-check-all" aria-label="Selecionar todos os controles desta seção" onchange="window.toggleSoASectionSelection(this)"></th>
                                                 <th style="width:75px">ID</th>
                                                 <th style="width:220px">Controle</th>
                                                 <th style="width:105px">Aplicável?</th>
@@ -663,7 +754,8 @@ import { navigate } from '../router.js';
 
                         html += `
                             <tr id="soa-row-${ctrl.id}" class="soa-row" data-standard="${escapeHTML(ctrl.standard || '')}" data-title="${escapeHTML(ctrl.title || '')}" data-status="${escapeHTML(ctrl.status || 'Missing')}">
-                                <td style="font-weight:700;color:var(--accent);font-size:0.8rem;white-space:nowrap">${escapeHTML(parsed.code)}</td>
+                                <td><input type="checkbox" class="soa-check" data-id="${escapeHTML(String(ctrl.id))}" aria-label="Selecionar ${escapeHTML(parsed.code)}" onchange="window.toggleSoASelection('${ctrl.id}', this.checked)"></td>
+                                <td style="font-weight:700;color:var(--accent);font-size:0.8rem;white-space:nowrap;font-variant-numeric:tabular-nums">${escapeHTML(parsed.code)}</td>
                                 <td style="font-weight:400;font-size:0.8rem;line-height:1.45;word-break:break-word">${escapeHTML(parsed.title)}</td>
                                 <td>
                                     <div class="segmented-control ${isNA ? 'not-applicable' : 'applicable'}" id="seg-toggle-${ctrl.id}">
@@ -689,15 +781,20 @@ import { navigate } from '../router.js';
                                     </div>
                                 </td>
                                 <td>
-                                    <input type="text" value="${escapeHTML(justVal)}" 
-                                        placeholder="${isNA ? 'Justificativa obrigatória para exclusão' : 'Notas do consultor...'}" 
-                                        class="soa-justification-input ${isJustificationMissing ? 'required-missing' : ''}" 
-                                        style="width:100%; box-sizing:border-box; background:rgba(7,11,20,0.6); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:6px 10px; color:var(--text); font-size:0.8rem;"
+                                    <input type="text" value="${escapeHTML(justVal)}"
+                                        placeholder="${isNA ? 'Justificativa obrigatória para exclusão' : 'Notas do consultor...'}"
+                                        class="soa-justification-input ${isJustificationMissing ? 'required-missing' : ''}"
+                                        style="width:100%; box-sizing:border-box; background:var(--bg); border:1px solid var(--border); padding:6px 10px; color:var(--text); font-size:0.8rem;"
                                         onblur="window.saveSoAJustification('${ctrl.id}', this.value); if (this.value.trim() !== '') { this.classList.remove('required-missing'); } else if (${isNA}) { this.classList.add('required-missing'); }" />
                                 </td>
                                 <td>
-                                    <select onchange="window.updateControlMaturity('${ctrl.id}', this.value)" class="custom-select" style="padding:6px 10px;width:100%;background:rgba(7,11,20,0.8);color:var(--text);border:1px solid rgba(255,255,255,0.08);border-radius:8px;font-weight:600;font-size:0.8rem;cursor:pointer">
-                                        ${[0, 1, 2, 3, 4, 5].map(val => `<option value="${val}" ${ctrl.maturity === val ? 'selected' : ''}>CMM ${val}</option>`).join('')}
+                                    <!-- Controle fora do escopo não tem grau de implementação: o
+                                         seletor fica travado em vez de aceitar um número que
+                                         mentiria no relatório. -->
+                                    <select onchange="window.updateControlMaturity('${ctrl.id}', this.value)" class="custom-select"
+                                        ${isNA ? 'disabled title="Controle N/A não tem maturidade: está fora do escopo"' : ''}
+                                        style="padding:6px 10px;width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);font-weight:600;font-size:0.8rem;font-variant-numeric:tabular-nums;cursor:${isNA ? 'not-allowed' : 'pointer'};${isNA ? 'opacity:0.45' : ''}">
+                                        ${isNA ? '<option>—</option>' : [0, 1, 2, 3, 4, 5].map(val => `<option value="${val}" ${ctrl.maturity === val ? 'selected' : ''}>CMM ${val}</option>`).join('')}
                                     </select>
                                 </td>
                             </tr>
@@ -718,6 +815,124 @@ import { navigate } from '../router.js';
             c.innerHTML = `<div class="error">Erro ao carregar SoA: ${escapeHTML(e.message)}</div>`;
         }
     }
+
+    // ——— Seleção em lote ————————————————————————————————————————————————
+    // Aplicabilidade NUNCA é editável em lote: cada exclusão precisa da própria
+    // justificativa. `Marcar N/A` existe na barra apenas para dizer isso.
+
+    function soaSelection() {
+        if (!(window.soaSel instanceof Set)) window.soaSel = new Set();
+        return window.soaSel;
+    }
+
+    window.toggleSoASelection = function(ctrlId, checked) {
+        const sel = soaSelection();
+        if (checked) sel.add(String(ctrlId)); else sel.delete(String(ctrlId));
+        renderSoABatchBar();
+    };
+
+    window.toggleSoASectionSelection = function(checkbox) {
+        const tabela = checkbox.closest('table');
+        if (!tabela) return;
+        tabela.querySelectorAll('tbody tr').forEach(tr => {
+            if (tr.style.display === 'none') return;   // respeita o filtro visível
+            const box = tr.querySelector('.soa-check');
+            if (!box) return;
+            box.checked = checkbox.checked;
+            window.toggleSoASelection(box.dataset.id, checkbox.checked);
+        });
+    };
+
+    window.clearSoASelection = function() {
+        soaSelection().clear();
+        document.querySelectorAll('.soa-check, .soa-check-all').forEach(b => { b.checked = false; });
+        renderSoABatchBar();
+    };
+
+    function renderSoABatchBar() {
+        let bar = document.getElementById('soa-batch-bar');
+        const n = soaSelection().size;
+        if (!n) { if (bar) bar.remove(); return; }
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'soa-batch-bar';
+            bar.className = 'soa-batch-bar';
+            document.body.appendChild(bar);
+        }
+        bar.innerHTML = `
+            <span class="soa-batch-count">${n} ${n === 1 ? 'controle selecionado' : 'controles selecionados'}</span>
+            <button class="btn btn-primary" onclick="window.batchMarkImplemented()">Marcar implementado</button>
+            <button class="btn btn-secondary" disabled style="cursor:not-allowed;opacity:0.5"
+                title="Justificativa de exclusão é individual: cada controle N/A precisa da própria.">Marcar N/A</button>
+            <button class="btn btn-secondary soa-batch-close" onclick="window.clearSoASelection()" aria-label="Limpar seleção">&#10005;</button>`;
+    }
+
+    window.batchMarkImplemented = async function() {
+        const ids = Array.from(soaSelection());
+        if (!ids.length) return;
+        const controls = window.currentSoAControls || [];
+        // Guarda o estado anterior ANTES de gravar: desfazer é janela pré-commit,
+        // não um delete no histórico.
+        const antes = ids.map(id => {
+            const ctrl = controls.find(x => String(x.id) === String(id));
+            return { id, status: ctrl ? ctrl.status : 'Missing' };
+        }).filter(x => x.status !== 'Not Applicable');
+
+        if (!antes.length) {
+            showToast('Controles N/A não recebem status: estão fora do escopo', 'error');
+            return;
+        }
+
+        try {
+            await Promise.all(antes.map(x => api('PUT', `/api/v1/controls/${x.id}`, { status: 'Implemented' })));
+            window.clearSoASelection();
+            const n = antes.length;
+            showToast(`${n} ${n === 1 ? 'controle marcado' : 'controles marcados'} como implementado`, 'info', async () => {
+                try {
+                    await Promise.all(antes.map(x => api('PUT', `/api/v1/controls/${x.id}`, { status: x.status })));
+                    showToast('Alteração desfeita');
+                } catch (e) {
+                    showToast('Não foi possível desfazer', 'error');
+                }
+                render();
+            });
+            render();
+        } catch (e) {
+            showToast('Erro ao atualizar os controles selecionados', 'error');
+        }
+    };
+
+    // Um único listener no document, instalado uma vez, que só age quando a
+    // tela da vez é a SoA — mais barato que montar e desmontar a cada render.
+    document.addEventListener('keydown', (e) => {
+        if (S.view !== 'soa') return;
+        const busca = document.getElementById('soa-search');
+        const digitando = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
+
+        if ((e.key === 'k' || e.key === 'K') && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            busca?.focus();
+            busca?.select();
+            return;
+        }
+        if (e.key === '/' && !digitando) {
+            e.preventDefault();
+            busca?.focus();
+            return;
+        }
+        if (e.key === 'Escape') {
+            // Cascata: o menu de conta é o primeiro da fila e tem listener
+            // próprio; aqui só se cuida do campo e da seleção.
+            const menu = document.getElementById('account-menu');
+            if (menu && !menu.hidden) return;
+            if (document.activeElement === busca && busca.value) {
+                busca.value = '';
+                window.filterSoATable();
+                return;
+            }
+            if (soaSelection().size) window.clearSoASelection();
+        }
+    });
 
     window.toggleSoAAccordion = function(sectionId) {
         const el = document.getElementById(`soa-acc-${sectionId}`);
@@ -946,20 +1161,93 @@ import { navigate } from '../router.js';
         }
     };
 
+    // Marcar N/A NÃO é um clique: é uma exclusão de escopo, e exclusão sem
+    // justificativa registrada é achado de auditoria. O caminho para N/A passa
+    // obrigatoriamente pelo bloco de justificativa; voltar para Aplicável é
+    // livre, porque não remove nada da SoA.
     window.toggleSoAApplicability = async function(ctrlId, value) {
+        if (value === 'Not Applicable') {
+            openNAJustificationModal(ctrlId);
+            return;
+        }
         try {
-            const status = value === 'Not Applicable' ? 'Not Applicable' : 'Missing';
-            await api('PUT', `/api/v1/controls/${ctrlId}`, { status });
-            showToast('Aplicabilidade atualizada');
+            await api('PUT', `/api/v1/controls/${ctrlId}`, { status: 'Missing' });
+            showToast('Controle voltou a ser aplicável');
             render();
         } catch(e) {
             showToast('Erro ao atualizar aplicabilidade', 'error');
         }
     };
 
+    function openNAJustificationModal(ctrlId) {
+        const ctrl = (window.currentSoAControls || []).find(x => String(x.id) === String(ctrlId));
+        const parsed = ctrl ? parseControlTitle(ctrl) : { code: '', title: '' };
+        openModal(`
+            <div style="padding:1.5rem 1.75rem;max-width:520px">
+                <div style="font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:0.14em;color:var(--text-dim);margin-bottom:6px">${escapeHTML(parsed.code)}</div>
+                <h3 style="font-family:var(--font-head);font-weight:600;font-size:17px;margin:0 0 4px">Excluir do escopo</h3>
+                <p style="color:var(--text-2);font-size:13px;margin:0 0 16px;line-height:1.5">${escapeHTML(parsed.title)}</p>
+                <div style="background:rgba(245,158,11,0.08);border-left:2px solid var(--warning);padding:14px 16px">
+                    <label for="na-why" style="display:block;font-size:12.5px;color:var(--text-2);margin-bottom:8px">Justificativa da exclusão — vai para a SoA e para o relatório de auditoria.</label>
+                    <textarea id="na-why" rows="3" oninput="window.updateNACounter()"
+                        style="width:100%;box-sizing:border-box;min-height:76px;background:var(--bg);border:1px solid var(--border);color:var(--text);font-family:var(--font-body);font-size:13px;padding:8px 10px;resize:vertical"
+                        placeholder="Por que este controle não se aplica ao escopo do SGSI?"></textarea>
+                    <div id="na-counter" style="font-family:var(--font-mono);font-size:10px;color:var(--warning);margin-top:6px">0/${MIN_NA_JUSTIFICATION} caracteres mínimos</div>
+                </div>
+                <p style="color:var(--text-dim);font-size:12px;margin:14px 0 0;line-height:1.5">Confirmar zera a maturidade CMMI e trava o status: um controle fora do escopo não tem grau de implementação.</p>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+                    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+                    <button class="btn btn-primary" id="na-confirm" disabled
+                        title="Escreva ao menos ${MIN_NA_JUSTIFICATION} caracteres de justificativa"
+                        onclick="window.confirmNA('${ctrlId}')">Confirmar N/A</button>
+                </div>
+            </div>
+        `);
+        setTimeout(() => document.getElementById('na-why')?.focus(), 0);
+    }
+    window.openNAJustificationModal = openNAJustificationModal;
+
+    window.updateNACounter = function() {
+        const ta = document.getElementById('na-why');
+        const counter = document.getElementById('na-counter');
+        const btn = document.getElementById('na-confirm');
+        if (!ta || !counter || !btn) return;
+        const n = ta.value.trim().length;
+        const ok = n >= MIN_NA_JUSTIFICATION;
+        counter.textContent = `${n}/${MIN_NA_JUSTIFICATION} caracteres mínimos`;
+        counter.style.color = ok ? 'var(--text-dim)' : 'var(--warning)';
+        btn.disabled = !ok;
+        btn.title = ok ? 'Registra a exclusão na SoA' : `Escreva ao menos ${MIN_NA_JUSTIFICATION} caracteres de justificativa`;
+    };
+
+    window.confirmNA = async function(ctrlId) {
+        const why = (document.getElementById('na-why')?.value || '').trim();
+        if (why.length < MIN_NA_JUSTIFICATION) return;
+        try {
+            await api('PUT', `/api/v1/controls/${ctrlId}`, { status: 'Not Applicable', description: why });
+            // Controle fora do escopo não tem grau de implementação: a maturidade
+            // remanescente mentiria no relatório.
+            await api('PUT', `/api/v1/controls/${ctrlId}/maturity`, { maturity: 0 }).catch(() => {});
+            closeModal();
+            showToast('Controle excluído do escopo, com justificativa registrada');
+            render();
+        } catch(e) {
+            showToast('Erro ao registrar a exclusão', 'error');
+        }
+    };
+
     window.saveSoAJustification = async function(ctrlId, value) {
+        const ctrl = (window.currentSoAControls || []).find(x => String(x.id) === String(ctrlId));
+        // Apagar a justificativa de um controle N/A é desfazer o registro da
+        // exclusão pela porta dos fundos. O campo volta ao valor gravado.
+        if (ctrl && isControlNA(ctrl) && !value.trim()) {
+            showToast('Controle N/A não pode ficar sem justificativa', 'error');
+            render();
+            return;
+        }
         try {
             await api('PUT', `/api/v1/controls/${ctrlId}`, { description: value });
+            if (ctrl) ctrl.description = value;
             showToast('Justificativa salva');
         } catch(e) {
             showToast('Erro ao salvar justificativa', 'error');

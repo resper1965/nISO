@@ -858,6 +858,23 @@
         }
 
         /* Collapsible Accordion Panels */
+
+        /* ——— SoA: carregamento, seleção e lote ——————————————————————— */
+
+        /* Skeleton nas linhas, não spinner: as colunas já entram dimensionadas,
+           então a tabela não pula quando os dados chegam. */
+        .sk-bar { height: 8px; background: var(--surface-2); display: inline-block; animation: sk-pulse 1400ms ease-in-out infinite; }
+        @keyframes sk-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+        .soa-check, .soa-check-all { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
+        .soa-row:has(.soa-check:checked) { background: rgba(0, 173, 232, 0.07); }
+
+        /* Barra de lote: aparece só com seleção. Precisa quebrar linha, senão o
+           ✕ some quando o texto da contagem cresce. */
+        .soa-batch-bar { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-lg); z-index: 8000; animation: rise 200ms var(--ease-out); max-width: calc(100vw - 56px); }
+        .soa-batch-bar .btn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+        .soa-batch-count { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-dim); }
+        .soa-batch-close { width: 30px; padding: 0; }
         .soa-accordion {
             background: rgba(255, 255, 255, 0.01);
             border: 1px solid rgba(255, 255, 255, 0.06);
@@ -1025,13 +1042,15 @@
             background: rgba(255, 255, 255, 0.02);
             box-shadow: 0 0 0 1px rgba(0, 173, 232, 0.2);
         }
+        /* Justificativa ausente em controle N/A trava a producao da SoA:
+           e bloqueio, nao aviso — por isso vermelho e nao ambar. */
         .soa-justification-input.required-missing {
-            border-color: rgba(245, 158, 11, 0.4);
-            background: rgba(245, 158, 11, 0.02);
+            border-color: var(--danger);
+            background: rgba(239, 68, 68, 0.06);
         }
         .soa-justification-input.required-missing:focus {
-            border-color: var(--warning);
-            box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.3);
+            border-color: var(--danger);
+            box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.35);
         }
 
         /* ————— GOVERNANCE & TEAM OVERHAUL ————— */
