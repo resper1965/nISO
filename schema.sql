@@ -225,9 +225,22 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     -- NOT NULL aqui derrubaria o registro dessas ações — perder trilha para
     -- ganhar constraint é o inverso do objetivo.
     project_id TEXT,
+    -- Trilha por CAMPO (migration 0025). Nullable: a maioria das chamadas de
+    -- logAudit registra acao de plataforma, que nao tem campo antes/depois.
+    -- `operation_id` agrupa a operacao — uma acao em lote sobre 3 controles
+    -- gera 3 linhas com o mesmo id — e liga a operacao ao registro de que ela
+    -- foi desfeita. Desfazer NAO apaga linha: a tabela e append-only.
+    entity_type TEXT,
+    entity_id TEXT,
+    field TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    operation_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_project ON audit_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_operation ON audit_logs(operation_id);
 -- Trilha de auditoria imutável (append-only): bloqueia UPDATE/DELETE no nível do DB.
 CREATE TRIGGER IF NOT EXISTS audit_logs_no_update
 BEFORE UPDATE ON audit_logs

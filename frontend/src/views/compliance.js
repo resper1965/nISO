@@ -112,6 +112,11 @@ import { navigate } from '../router.js';
                     <div style="padding:1rem; text-align:center; color:var(--muted); font-size:0.75rem">Carregando evidências...</div>
                 </div>
                 
+                <div class="ctx-label" id="control-trilha-label">Histórico</div>
+                <div id="control-trilha" style="margin-bottom:1.5rem">
+                    <div style="padding:1rem;text-align:center;color:var(--muted);font-size:0.75rem">Carregando histórico...</div>
+                </div>
+
                 <div style="display:flex; gap:0.75rem">
                     <button class="btn btn-primary" style="flex:1" onclick="generatePolicyForControl('${ctrl.id}')">Gerar Política AI</button>
                     <button class="btn" style="flex:1" onclick="openEvidenceUploadModal('${S.currentProject?.id}', '${ctrl.id}')">Upload Evidência</button>
@@ -119,7 +124,62 @@ import { navigate } from '../router.js';
             </div>
         `);
         loadControlEvidence(ctrl.id);
+        loadControlTrilha(ctrl.id);
     }
+
+    /**
+     * Histórico do controle: `campo: antes → depois`, autor, quando e o marcador
+     * de lote. O backend já gravava a trilha por campo; faltava exibir.
+     */
+    async function loadControlTrilha(controlId) {
+        const alvo = document.getElementById('control-trilha');
+        if (!alvo) return;
+        let registros = [];
+        try {
+            const res = await api('GET', `/api/v1/controls/${controlId}/trilha`);
+            registros = Array.isArray(res) ? res : (res.registros || []);
+        } catch (e) {
+            alvo.innerHTML = `<div style="font-size:0.75rem;color:var(--text-dim)">Não foi possível carregar o histórico.</div>`;
+            return;
+        }
+
+        const rotulo = document.getElementById('control-trilha-label');
+        if (rotulo) rotulo.textContent = `Histórico · ${registros.length}`;
+
+        if (!registros.length) {
+            alvo.innerHTML = `<div style="font-size:0.75rem;color:var(--text-dim)">Sem alterações registradas neste controle.</div>`;
+            return;
+        }
+
+        alvo.innerHTML = `
+            <div style="border:1px solid var(--border)">
+                ${registros.map(r => `
+                    <div style="padding:10px 12px;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--text-2)">
+                        <div><strong style="color:var(--text);font-weight:500">${escapeHTML(r.campo || 'alteração')}</strong>:
+                            ${escapeHTML(r.antes ?? '—')} <span style="color:var(--text-dim)">→</span> ${escapeHTML(r.depois ?? '—')}</div>
+                        <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:4px">
+                            ${escapeHTML(r.autor || 'sistema')} · ${escapeHTML(tempoRelativo(r.quando))}${r.itensNaOperacao > 1 ? ` · em lote (${r.itensNaOperacao} campos)` : ''}
+                        </div>
+                    </div>`).join('')}
+            </div>
+            <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:8px">imutável · exportável no relatório de auditoria</div>`;
+    }
+    window.loadControlTrilha = loadControlTrilha;
+
+    /** "há 12 dias" lê melhor que um carimbo ISO no meio de uma lista. */
+    function tempoRelativo(quando) {
+        const t = Date.parse(String(quando || '').replace(' ', 'T') + (String(quando || '').includes('Z') ? '' : 'Z'));
+        if (!Number.isFinite(t)) return String(quando || '');
+        const seg = Math.max(0, Math.floor((Date.now() - t) / 1000));
+        if (seg < 60) return 'agora há pouco';
+        const min = Math.floor(seg / 60);
+        if (min < 60) return `há ${min} ${min === 1 ? 'minuto' : 'minutos'}`;
+        const h = Math.floor(min / 60);
+        if (h < 24) return `há ${h} ${h === 1 ? 'hora' : 'horas'}`;
+        const d = Math.floor(h / 24);
+        return `há ${d} ${d === 1 ? 'dia' : 'dias'}`;
+    }
+    window.tempoRelativo = tempoRelativo;
 
     async function updateControlStatus(id, status) {
         try {
@@ -883,13 +943,22 @@ import { navigate } from '../router.js';
             return;
         }
 
+        // Um id de operação para o lote inteiro: é ele que agrupa as linhas da
+        // trilha ("em lote") e o que o desfazer marca depois. Sem ele, reverter
+        // deixaria duas alterações soltas por controle no histórico.
+        const operacao = `op-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
         try {
-            await Promise.all(antes.map(x => api('PUT', `/api/v1/controls/${x.id}`, { status: 'Implemented' })));
+            await Promise.all(antes.map(x => api('PUT', `/api/v1/controls/${x.id}`, { status: 'Implemented' }, { 'X-Operacao': operacao })));
             window.clearSoASelection();
             const n = antes.length;
             showToast(`${n} ${n === 1 ? 'controle marcado' : 'controles marcados'} como implementado`, 'info', async () => {
                 try {
-                    await Promise.all(antes.map(x => api('PUT', `/api/v1/controls/${x.id}`, { status: x.status })));
+                    await Promise.all(antes.map(x => api('PUT', `/api/v1/controls/${x.id}`, { status: x.status }, { 'X-Operacao': operacao })));
+                    // Marca a operação como desfeita: a trilha é append-only, e é
+                    // a LEITURA que esconde o par. Nenhuma linha é apagada.
+                    await Promise.all(antes.map(x =>
+                        api('POST', `/api/v1/controls/${x.id}/trilha/desfazer`, { operacao }).catch(() => {})));
                     showToast('Alteração desfeita');
                 } catch (e) {
                     showToast('Não foi possível desfazer', 'error');

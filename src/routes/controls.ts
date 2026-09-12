@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 import { logAudit, requireResourceAccess, verifyPassword, erro500 } from '../helpers';
 import { validateBody, controlUpdateSchema, maturitySchema, statusSchema, assinaturaSchema } from '../schemas';
+import { registrarAlteracoes, registrarDesfazer, lerTrilha } from '../trilha';
 import { NA_STATUS, hasValidApplicability } from '../services/soa-logic';
 
 // Sub-router de controles, montado em /api/v1/controls (FORA de
@@ -61,7 +62,7 @@ controlsApp.put('/:id', async (c) => {
     const { status, title, description } = v.data as any;
 
     const atual = await c.env.DB.prepare(
-      'SELECT project_id, status, description FROM compliance_controls WHERE id = ?'
+      'SELECT project_id, status, title, description, maturity, owner FROM compliance_controls WHERE id = ?'
     ).bind(id).first() as any;
     // requireResourceAccess devolve true sem checar existência para papéis de
     // staff, então o 404 precisa ser explícito.
@@ -107,7 +108,27 @@ controlsApp.put('/:id', async (c) => {
     await c.env.DB.prepare(`UPDATE compliance_controls SET ${updates.join(', ')} WHERE id = ?`).bind(...values).run();
 
     const ator = c.get('user')?.email ?? 'system';
-    await logAudit(c.env.DB, 'control.updated', ator, `Controle ${id} atualizado`, '', '', atual.project_id);
+
+    // Trilha por campo, com rótulo em PT-BR — nunca a chave interna: quem lê o
+    // histórico é o consultor e o auditor, não quem escreveu o schema.
+    const operacao = c.req.header('X-Operacao') || undefined;
+    await registrarAlteracoes(c.env.DB, {
+      acao: 'control.updated',
+      autor: ator,
+      entidade: 'compliance_controls',
+      entidadeId: id,
+      projectId: atual.project_id,
+      operacao,
+      alteracoes: [
+        { campo: 'Status', antes: atual.status, depois: status ?? atual.status },
+        { campo: 'Título', antes: atual.title, depois: title ?? atual.title },
+        { campo: 'Justificativa', antes: atual.description, depois: description !== undefined ? description : atual.description },
+        ...(virouNA ? [
+          { campo: 'Maturidade CMMI', antes: atual.maturity, depois: null },
+          { campo: 'Responsável', antes: atual.owner, depois: null },
+        ] : []),
+      ],
+    });
     // Evento próprio: a perda da aprovação é o que o auditor precisa enxergar,
     // e ela ficaria invisível dentro de um "controle atualizado" genérico.
     if (textoMudou) {
@@ -137,12 +158,30 @@ controlsApp.put('/:id/maturity', async (c) => {
       return c.json({ error: 'Maturidade deve ser entre 0 e 5' }, 400);
     }
 
+    const antes = await c.env.DB.prepare(
+      'SELECT project_id, status, maturity FROM compliance_controls WHERE id = ?'
+    ).bind(id).first() as any;
+    if (!antes) return c.json({ error: 'Controle nao encontrado' }, 404);
+
+    // Controle fora do escopo nao tem grau de implementacao: aceitar maturidade
+    // nele contradiria o gate de N/A, que zera justamente este campo.
+    if (antes.status === NA_STATUS) {
+      return c.json({ error: 'Controle nao aplicavel nao tem maturidade: esta fora do escopo.' }, 400);
+    }
+
     await c.env.DB.prepare(
       'UPDATE compliance_controls SET maturity = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
     ).bind(maturity, id).run();
 
-    const projRow = await c.env.DB.prepare('SELECT project_id FROM compliance_controls WHERE id = ?').bind(id).first() as any;
-    await logAudit(c.env.DB, 'control.maturity_updated', c.get('user')?.email || 'system', `Maturidade do controle ${id} atualizada para ${maturity}`, '', '', projRow?.project_id);
+    await registrarAlteracoes(c.env.DB, {
+      acao: 'control.maturity_updated',
+      autor: c.get('user')?.email || 'system',
+      entidade: 'compliance_controls',
+      entidadeId: id,
+      projectId: antes.project_id,
+      operacao: c.req.header('X-Operacao') || undefined,
+      alteracoes: [{ campo: 'Maturidade CMMI', antes: antes.maturity, depois: maturity }],
+    });
     return c.json({ ok: true });
   } catch (e: any) {
     if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
@@ -178,7 +217,15 @@ controlsApp.put('/:id/status', async (c) => {
     ).bind(status, id).run();
 
     const ator = c.get('user')?.email || 'system';
-    await logAudit(c.env.DB, 'control.status_updated', ator, `Status do controle ${id} atualizado para ${status}`, '', '', atual.project_id);
+    await registrarAlteracoes(c.env.DB, {
+      acao: 'control.status_updated',
+      autor: ator,
+      entidade: 'compliance_controls',
+      entidadeId: id,
+      projectId: atual.project_id,
+      operacao: c.req.header('X-Operacao') || undefined,
+      alteracoes: [{ campo: 'Status', antes: atual.status, depois: status }],
+    });
     if (virouNA) {
       await logAudit(c.env.DB, 'control.excluded_from_scope', ator, `Controle ${id} excluído do escopo com justificativa; maturidade e dono zerados`, '', '', atual.project_id);
     }
@@ -245,3 +292,55 @@ const handleControlApprove = async (c: any) => {
 
 controlsApp.post('/:id/approve', handleControlApprove);
 controlsApp.put('/:id/approve', handleControlApprove);
+
+/**
+ * Histórico do controle: `campo: antes → depois`, autor, quando e o marcador de
+ * lote. É o que a tela de detalhe da SoA mostra — a trilha já era gravada e não
+ * tinha por onde ser lida.
+ */
+controlsApp.get('/:id/trilha', async (c) => {
+  try {
+    const id = c.req.param('id');
+    await requireResourceAccess(c.env.DB, 'compliance_controls', id, c.get('user'));
+    return c.json({ ok: true, registros: await lerTrilha(c.env.DB, 'compliance_controls', id) });
+  } catch (e: any) {
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
+    return erro500(c, 'Falha ao ler a trilha do controle', e);
+  }
+});
+
+/**
+ * Marca uma operação como desfeita. NÃO apaga linha: `audit_logs` é append-only
+ * por trigger do banco. A leitura da trilha é que esconde o par operação+desfazer
+ * (ver src/trilha.ts) — o banco guarda os dois fatos para quem exporta a trilha
+ * crua, e a tela mostra o que aconteceu de líquido.
+ */
+controlsApp.post('/:id/trilha/desfazer', async (c) => {
+  try {
+    const id = c.req.param('id');
+    await requireResourceAccess(c.env.DB, 'compliance_controls', id, c.get('user'));
+    const { operacao } = await c.req.json<{ operacao?: string }>();
+    if (!operacao) return c.json({ error: 'Informe a operação a desfazer' }, 400);
+
+    // Só se desfaz operação que existe E que tocou ESTE controle: sem a segunda
+    // checagem, um id de operação de outro tenant sumiria da trilha dele.
+    const linha = await c.env.DB.prepare(
+      `SELECT project_id FROM audit_logs
+        WHERE operation_id = ? AND entity_type = 'compliance_controls' AND entity_id = ?
+        LIMIT 1`
+    ).bind(operacao, id).first() as any;
+    if (!linha) return c.json({ error: 'Operação não encontrada para este controle' }, 404);
+
+    await registrarDesfazer(c.env.DB, {
+      autor: c.get('user')?.email || 'system',
+      operacao,
+      projectId: linha.project_id,
+      entidade: 'compliance_controls',
+      entidadeId: id,
+    });
+    return c.json({ ok: true });
+  } catch (e: any) {
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
+    return erro500(c, 'Falha ao registrar o desfazer', e);
+  }
+});

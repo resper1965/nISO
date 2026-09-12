@@ -2,8 +2,11 @@ import { S } from './state.js';
 
 export const API_BASE = window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' ? 'http://127.0.0.1:8787' : window.location.origin;
 
-async function api(m, p, b) {
-    const headers = { 'Content-Type': 'application/json' };
+// `extras` carrega cabeçalho por chamada — hoje só o X-Operacao, que agrupa as
+// linhas da trilha de uma ação em lote. Fica opcional para não tocar nas ~200
+// chamadas existentes.
+async function api(m, p, b, extras) {
+    const headers = { 'Content-Type': 'application/json', ...(extras || {}) };
     if (S.token) headers['Authorization'] = `Bearer ${S.token}`;
     // AbortSignal.timeout é nativo: sem ele, um backend travado deixava a UI
     // esperando para sempre, sem erro e sem feedback.

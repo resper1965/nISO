@@ -187,10 +187,25 @@ describe('seleção em lote', () => {
     window.toggleSoASelection('c2', true);
     await window.batchMarkImplemented();
 
-    expect(apiMock).toHaveBeenCalledWith('PUT', '/api/v1/controls/c1', { status: 'Implemented' });
-    expect(apiMock).toHaveBeenCalledWith('PUT', '/api/v1/controls/c2', { status: 'Implemented' });
+    expect(apiMock).toHaveBeenCalledWith('PUT', '/api/v1/controls/c1', { status: 'Implemented' }, expect.any(Object));
+    expect(apiMock).toHaveBeenCalledWith('PUT', '/api/v1/controls/c2', { status: 'Implemented' }, expect.any(Object));
     expect(ultimoToast()).toContain('2 controles marcados');
     expect(document.querySelector('.toast-undo')).not.toBeNull();
+  });
+
+  // O lote inteiro compartilha um id de operacao: e ele que agrupa as linhas da
+  // trilha ("em lote") e o que o desfazer marca depois.
+  it('o lote inteiro viaja com UM id de operação', async () => {
+    window.toggleSoASelection('c1', true);
+    window.toggleSoASelection('c2', true);
+    await window.batchMarkImplemented();
+
+    const operacoes = apiMock.mock.calls
+      .filter(c => c[0] === 'PUT')
+      .map(c => c[3]['X-Operacao']);
+    expect(operacoes).toHaveLength(2);
+    expect(new Set(operacoes).size).toBe(1);
+    expect(operacoes[0]).toMatch(/^op-/);
   });
 
   it('Desfazer devolve CADA controle ao status que tinha, não a um padrão', async () => {
@@ -202,8 +217,21 @@ describe('seleção em lote', () => {
     document.querySelector('.toast-undo').click();
     await new Promise(r => setTimeout(r, 0));
 
-    expect(apiMock).toHaveBeenCalledWith('PUT', '/api/v1/controls/c1', { status: 'Missing' });
-    expect(apiMock).toHaveBeenCalledWith('PUT', '/api/v1/controls/c2', { status: 'Partial' });
+    expect(apiMock).toHaveBeenCalledWith('PUT', '/api/v1/controls/c1', { status: 'Missing' }, expect.any(Object));
+    expect(apiMock).toHaveBeenCalledWith('PUT', '/api/v1/controls/c2', { status: 'Partial' }, expect.any(Object));
+  });
+
+  // A trilha e append-only: desfazer MARCA a operacao, nao apaga linha.
+  it('Desfazer marca a operação na trilha, em vez de apagá-la', async () => {
+    window.toggleSoASelection('c1', true);
+    await window.batchMarkImplemented();
+    const operacao = apiMock.mock.calls.find(c => c[0] === 'PUT')[3]['X-Operacao'];
+    apiMock.mockClear();
+
+    document.querySelector('.toast-undo').click();
+    await new Promise(r => setTimeout(r, 0));
+
+    expect(apiMock).toHaveBeenCalledWith('POST', '/api/v1/controls/c1/trilha/desfazer', { operacao });
   });
 
   it('controle N/A é ignorado no lote: está fora do escopo', async () => {
