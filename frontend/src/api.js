@@ -35,7 +35,15 @@ async function api(m, p, b) {
         const text = await r.text();
         throw new Error(`Resposta HTTP ${r.status} não é JSON (${p})`);
     }
-    if (!r.ok) throw new Error(data.error || (data.details ? data.details.map(i => i.message).join(', ') : 'API Error'));
+    if (!r.ok) {
+        const err = new Error(data.error || (data.details ? data.details.map(i => i.message).join(', ') : 'API Error'));
+        // O corpo inteiro fica pendurado no erro. O login precisa dos campos que
+        // acompanham a mensagem (`challengeRequired`, `attemptsRemaining`,
+        // `locked`) e antes eles se perdiam: só a string sobrevivia ao throw.
+        err.status = r.status;
+        err.body = data;
+        throw err;
+    }
     // ponytail: auto-unwrap enveloped arrays from backend (e.g. { ok: true, risks: [...] })
     if (data && data.ok === true) {
         for (const key in data) {

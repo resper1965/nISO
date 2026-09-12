@@ -68,15 +68,52 @@
         body { font-family: 'Inter', sans-serif; background: var(--bg); color: var(--text); overflow: hidden; display: flex; height: 100vh; font-weight: 300; }
 
         /* â€”â€”â€” LOGIN â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€”â€” */
-        #login-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: grid; grid-template-columns: 1.2fr 1fr; transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1); }
-        #login-overlay.hidden { opacity: 0; pointer-events: none; transform: scale(1.05); }
-        .login-hero { position: relative; overflow: hidden; background: url('/niso_login_hero_1783427222343.png') center/cover no-repeat; }
-        .login-hero::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 50%, var(--bg) 100%), linear-gradient(0deg, var(--bg) 0%, transparent 40%); }
-        .login-hero-content { position: relative; z-index: 2; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; padding: 5rem; }
-        .login-brand-logo { font-family: 'Montserrat', sans-serif; font-size: 4rem; font-weight: 500; letter-spacing: -0.05em; color: #fff; }
+        /* ——— AUTENTICAÇÃO ———————————————————————————————————————————
+           Cartão centralizado, não mais hero + coluna. É a tela onde o usuário
+           decide confiar antes de entregar credencial: nada compete com ela. */
+        #login-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 9999; display: flex; align-items: center; justify-content: center; padding: 24px; overflow-y: auto; transition: opacity var(--slow) var(--ease-out); }
+        #login-overlay.hidden { opacity: 0; pointer-events: none; }
+        .login-form-side { width: 100%; display: flex; align-items: center; justify-content: center; }
+        .login-box { width: min(420px, 100%); background: var(--surface); border: 1px solid var(--border); padding: 28px 32px 24px; display: flex; flex-direction: column; gap: 16px; animation: rise 220ms var(--ease-out); }
+        .login-brand-logo { font-family: var(--font-head); font-size: 26px; font-weight: 500; letter-spacing: -0.015em; color: var(--text); margin-bottom: 4px; }
         .login-brand-logo span { color: var(--accent); }
-        .login-form-side { display: flex; align-items: center; justify-content: center; padding: 4rem; border-left: 1px solid var(--border); }
-        .login-box { width: 100%; max-width: 380px; }
+        .login-title { font-family: var(--font-head); font-weight: 600; font-size: 17px; letter-spacing: -0.01em; color: var(--text); margin: 0; }
+        .login-lede { font-size: 12.5px; color: var(--text-2); line-height: 1.5; margin: 0; }
+        .login-field { display: flex; flex-direction: column; gap: 6px; }
+        .login-label { font-size: 12px; color: var(--text-dim); }
+
+        /* A assinatura ness. é obrigatória AQUI: é onde o usuário decide em quem
+           confia. Na área de trabalho ela não aparece. */
+        .login-sign { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-top: 14px; border-top: 1px solid var(--border); }
+        .login-sign-house { font-family: var(--font-head); font-size: 13px; font-weight: 500; color: var(--text-2); }
+        .login-sign-house span { color: var(--accent); }
+        .login-sign-links { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+        .login-sign-links a { color: inherit; text-decoration: none; }
+        .login-sign-links a:hover { color: var(--text-2); }
+
+        /* Erro de credencial: a borda vermelha e o tremor dizem "recomece este
+           campo" sem que a MENSAGEM diga qual dos dois errou. */
+        .form-input.is-invalid { border-color: var(--danger); }
+        @keyframes shake { 10%, 90% { transform: translateX(-1px); } 20%, 80% { transform: translateX(2px); } 30%, 50%, 70% { transform: translateX(-3px); } 40%, 60% { transform: translateX(3px); } }
+        .shake { animation: shake 260ms cubic-bezier(.36, .07, .19, .97); }
+
+        .login-error { color: var(--danger); font-size: 12.5px; line-height: 1.5; margin: 0; }
+        .login-note { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin: 0; }
+        .login-link { font-size: 12.5px; color: var(--accent); text-decoration: none; background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--font-body); }
+        .login-link:hover { color: var(--accent-hover); }
+
+        /* Segundo fator: um campo só, seis dígitos, que valida ao completar. */
+        .mfa-code { font-family: var(--font-mono); font-size: 24px; letter-spacing: 0.5em; text-indent: 0.5em; text-align: center; padding: 10px 0; font-variant-numeric: tabular-nums; }
+        .mfa-countdown { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-dim); text-align: center; }
+        .mfa-countdown.is-urgent { color: var(--warning); }
+
+        /* Verificação anti-abuso: sem marca de fornecedor na interface. */
+        .login-challenge { display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface-2); border-left: 2px solid var(--accent); }
+        .login-challenge-label { font-size: 12px; color: var(--text-2); line-height: 1.5; }
+
+        @media (max-width: 480px) {
+            .login-box { padding: 22px 20px 18px; }
+        }
 
         /* ——— SIDEBAR ————————————————————————————————————————————————
            A largura precisa vir do flex-basis: a sidebar é filha de um

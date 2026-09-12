@@ -117,13 +117,99 @@ window.toggleGroup = function toggleGroup(groupId) {
         }
     }
 
+// ——— Autenticação: caminho de conta local ————————————————————————————
+// O caminho federado (SSO) fica para quando a federação entrar: hoje toda
+// conta é local, então não há segunda rota a descobrir.
+
+/** Token do desafio anti-abuso resolvido, quando existe verificação ativa. */
+let desafioResolvido = null;
+/** Handle do contador do bloqueio temporário. */
+let bloqueioTimer = null;
+
+window.setLoginChallengeToken = function setLoginChallengeToken(token) {
+        desafioResolvido = token || null;
+        const btn = document.getElementById('login-submit');
+        if (btn) btn.disabled = !desafioResolvido;
+    };
+
+/**
+ * Mostra o bloco de verificação. Só é chamado quando o SERVIDOR diz que o
+ * desafio é exigido — e ele só diz isso quando sabe conferir. Se não houver
+ * widget montável, o bloco não trava o botão: deixar `Entrar` desabilitado sem
+ * ter como resolver o desafio seria trancar o usuário para fora.
+ */
+function mostraDesafio() {
+        const bloco = document.getElementById('login-challenge');
+        if (!bloco || !bloco.hidden) return;
+        bloco.hidden = false;
+        const temWidget = Boolean(document.querySelector('#login-challenge-widget *'));
+        const btn = document.getElementById('login-submit');
+        if (btn) btn.disabled = temWidget && !desafioResolvido;
+    }
+
+function escondeDesafio() {
+        const bloco = document.getElementById('login-challenge');
+        if (bloco) bloco.hidden = true;
+        const btn = document.getElementById('login-submit');
+        if (btn) btn.disabled = false;
+    }
+
+/** Borda vermelha e tremor: dizem "recomece" sem dizer QUAL campo errou. */
+function sinalizaCredencialInvalida() {
+        const campos = [document.getElementById('login-email'), document.getElementById('login-password')];
+        campos.forEach(el => {
+            if (!el) return;
+            el.classList.add('is-invalid', 'shake');
+            setTimeout(() => el.classList.remove('shake'), 300);
+        });
+        const senha = document.getElementById('login-password');
+        if (senha) { senha.value = ''; senha.focus(); }
+    }
+
+function limpaSinalDeErro() {
+        ['login-email', 'login-password'].forEach(id => {
+            document.getElementById(id)?.classList.remove('is-invalid');
+        });
+    }
+
+/** Bloqueio temporário: o formulário para, com contagem visível. */
+function aplicaBloqueio(mensagem) {
+        const btn = document.getElementById('login-submit');
+        const err = document.getElementById('login-error');
+        const rotulo = btn ? btn.textContent : '';
+        let restam = 15 * 60;
+        clearInterval(bloqueioTimer);
+
+        const tick = () => {
+            if (restam <= 0) {
+                clearInterval(bloqueioTimer);
+                bloqueioTimer = null;
+                if (btn) { btn.disabled = false; btn.textContent = rotulo; }
+                if (err) err.style.display = 'none';
+                return;
+            }
+            const m = Math.floor(restam / 60);
+            const s = String(restam % 60).padStart(2, '0');
+            if (btn) { btn.disabled = true; btn.textContent = `Bloqueado — ${m}:${s}`; }
+            restam--;
+        };
+        if (err) { err.style.display = 'block'; err.textContent = mensagem; }
+        tick();
+        bloqueioTimer = setInterval(tick, 1000);
+    }
+
 window.doLogin = async function doLogin() {
         const email = document.getElementById('login-email').value;
         const pass = document.getElementById('login-password').value;
         const err = document.getElementById('login-error');
         err.style.display = 'none';
+        limpaSinalDeErro();
         try {
-            const res = await api('POST', '/api/v1/auth/login', { email, password: pass });
+            const corpo = { email, password: pass };
+            if (desafioResolvido) corpo.challengeToken = desafioResolvido;
+            const res = await api('POST', '/api/v1/auth/login', corpo);
+            escondeDesafio();
+            desafioResolvido = null;
             S.token = res.token; S.user = res.user;
             localStorage.setItem('niso_token', res.token);
             localStorage.setItem('niso_user', JSON.stringify(res.user));
@@ -135,10 +221,11 @@ window.doLogin = async function doLogin() {
                 document.getElementById('standard-login-box').style.display = 'none';
                 document.getElementById('first-login-reset-box').style.display = 'none';
                 document.getElementById('forgot-password-box').style.display = 'none';
-                document.getElementById('mfa-login-box').style.display = 'block';
+                document.getElementById('mfa-login-box').style.display = 'flex';
                 document.getElementById('mfa-login-error').textContent = '';
                 document.getElementById('mfa-login-code').value = '';
                 document.getElementById('mfa-login-code').focus();
+                iniciaContadorMfa();
                 // Uma conta pode exigir as DUAS coisas: segundo fator e troca de
                 // senha temporária. O segundo fator vem primeiro, mas a troca não
                 // pode se perder no caminho — senão a senha provisória vira
@@ -146,7 +233,7 @@ window.doLogin = async function doLogin() {
                 window._pendenteTrocaSenha = !!res.requiresPasswordChange;
             } else if (res.requiresPasswordChange) {
                 document.getElementById('standard-login-box').style.display = 'none';
-                document.getElementById('first-login-reset-box').style.display = 'block';
+                document.getElementById('first-login-reset-box').style.display = 'flex';
                 document.getElementById('forgot-password-box').style.display = 'none';
                 document.getElementById('first-reset-error').style.display = 'none';
             } else {
@@ -154,8 +241,20 @@ window.doLogin = async function doLogin() {
                 initApp();
             }
         } catch(e) {
+            const corpo = e.body || {};
+            // O token de desafio é de uso único: resolvido ou não, não vale
+            // para a próxima tentativa.
+            desafioResolvido = null;
+            if (corpo.locked) {
+                aplicaBloqueio(e.message);
+                limpaSinalDeErro();
+                return;
+            }
+            if (corpo.challengeRequired) mostraDesafio();
             err.style.display = 'block';
             err.textContent = e.message;
+            // Falha de rede não é credencial errada: não vale tremer o campo.
+            if (e.status === 401) sinalizaCredencialInvalida();
         }
     }
 
@@ -166,12 +265,76 @@ window.doLogin = async function doLogin() {
  * recuperação — o backend tenta o TOTP primeiro e cai para a lista de
  * recuperação, então aqui é um campo só.
  */
+// ——— Segundo fator ————————————————————————————————————————————————————
+// TOTP, sem SMS. O campo é um só, de 6 dígitos, que valida ao completar: o
+// código tem tamanho fixo e conhecido, então exigir um clique a mais depois do
+// sexto dígito é trabalho sem informação nova.
+
+/** true enquanto o usuário está digitando um código de recuperação. */
+let usandoRecuperacao = false;
+let mfaTimer = null;
+
+/** Janela do TOTP: 30 s alinhados ao relógio, como o autenticador mostra. */
+function iniciaContadorMfa() {
+        const el = document.getElementById('mfa-countdown');
+        if (!el) return;
+        clearInterval(mfaTimer);
+        const tick = () => {
+            if (usandoRecuperacao) { el.textContent = ''; return; }
+            const restam = 30 - (Math.floor(Date.now() / 1000) % 30);
+            el.textContent = `expira em ${restam}s`;
+            el.classList.toggle('is-urgent', restam <= 10);
+        };
+        tick();
+        mfaTimer = setInterval(tick, 1000);
+    }
+
+function paraContadorMfa() {
+        clearInterval(mfaTimer);
+        mfaTimer = null;
+    }
+window.iniciaContadorMfa = iniciaContadorMfa;
+
+/** Valida sozinho ao completar os 6 dígitos. Recuperação não tem tamanho fixo. */
+window.onMfaCodeInput = function onMfaCodeInput() {
+        const campo = document.getElementById('mfa-login-code');
+        if (!campo) return;
+        if (!usandoRecuperacao) {
+            campo.value = campo.value.replace(/\D/g, '').slice(0, 6);
+            if (campo.value.length === 6) window.doMfaLogin();
+        }
+    };
+
+/** O código de recuperação é a alternativa quando o aparelho se perdeu. */
+window.toggleRecoveryCode = function toggleRecoveryCode() {
+        usandoRecuperacao = !usandoRecuperacao;
+        const campo = document.getElementById('mfa-login-code');
+        const rotulo = document.getElementById('mfa-login-label');
+        const lede = document.getElementById('mfa-login-lede');
+        const botao = document.getElementById('mfa-toggle-recovery');
+        const contador = document.getElementById('mfa-countdown');
+        if (!campo) return;
+
+        campo.value = '';
+        campo.classList.toggle('mfa-code', !usandoRecuperacao);
+        campo.setAttribute('maxlength', usandoRecuperacao ? '20' : '6');
+        campo.setAttribute('inputmode', usandoRecuperacao ? 'text' : 'numeric');
+        if (rotulo) rotulo.textContent = usandoRecuperacao ? 'Código de recuperação' : 'Código';
+        if (lede) lede.textContent = usandoRecuperacao
+            ? 'Use um dos códigos de recuperação guardados na ativação do segundo fator. Cada um vale uma vez.'
+            : 'Digite o código de 6 dígitos do seu autenticador.';
+        if (botao) botao.textContent = usandoRecuperacao ? 'Usar o autenticador' : 'Usar código de recuperação';
+        if (contador) { contador.textContent = ''; contador.classList.remove('is-urgent'); }
+        campo.focus();
+    };
+
 window.doMfaLogin = async function doMfaLogin() {
         const codigo = (document.getElementById('mfa-login-code').value || '').trim();
         const err = document.getElementById('mfa-login-error');
         err.textContent = '';
         if (!codigo) { err.textContent = 'Informe o código.'; return; }
         try {
+            paraContadorMfa();
             await api('POST', '/api/v1/auth/mfa/verify', { codigo });
             // O backend reescreveu a sessão removendo `mfa_pending`; o token é o
             // mesmo, então não há nada a regravar no localStorage.
@@ -182,18 +345,21 @@ window.doMfaLogin = async function doMfaLogin() {
             if (window._pendenteTrocaSenha) {
                 window._pendenteTrocaSenha = false;
                 document.getElementById('standard-login-box').style.display = 'none';
-                document.getElementById('first-login-reset-box').style.display = 'block';
+                document.getElementById('first-login-reset-box').style.display = 'flex';
                 document.getElementById('first-reset-error').style.display = 'none';
                 document.getElementById('first-new-password').focus();
                 return;
             }
 
-            document.getElementById('standard-login-box').style.display = 'block';
+            document.getElementById('standard-login-box').style.display = 'flex';
             document.getElementById('login-overlay').classList.add('hidden');
             initApp();
         } catch(e) {
             err.textContent = e.message;
             document.getElementById('mfa-login-code').select();
+            // O código errado pode ser só o da janela anterior: o contador volta
+            // para o usuário saber quanto falta para o próximo.
+            if (!usandoRecuperacao) iniciaContadorMfa();
         }
     }
 
@@ -201,10 +367,12 @@ window.doMfaLogin = async function doMfaLogin() {
 window.cancelMfaLogin = function cancelMfaLogin() {
         S.token = null; S.user = null;
         window._pendenteTrocaSenha = false;
+        paraContadorMfa();
+        if (usandoRecuperacao) window.toggleRecoveryCode();
         localStorage.removeItem('niso_token');
         localStorage.removeItem('niso_user');
         document.getElementById('mfa-login-box').style.display = 'none';
-        document.getElementById('standard-login-box').style.display = 'block';
+        document.getElementById('standard-login-box').style.display = 'flex';
         document.getElementById('login-password').value = '';
     }
 
@@ -878,15 +1046,15 @@ window.initApp = async function initApp() {
 window.showForgotPasswordForm = function() {
         document.getElementById('standard-login-box').style.display = 'none';
         document.getElementById('first-login-reset-box').style.display = 'none';
-        document.getElementById('forgot-password-box').style.display = 'block';
-        document.getElementById('forgot-email-step').style.display = 'block';
+        document.getElementById('forgot-password-box').style.display = 'flex';
+        document.getElementById('forgot-email-step').style.display = 'flex';
         document.getElementById('forgot-code-step').style.display = 'none';
         document.getElementById('forgot-error').style.display = 'none';
         document.getElementById('forgot-success').style.display = 'none';
     }
 
 window.showStandardLoginForm = function() {
-        document.getElementById('standard-login-box').style.display = 'block';
+        document.getElementById('standard-login-box').style.display = 'flex';
         document.getElementById('first-login-reset-box').style.display = 'none';
         document.getElementById('forgot-password-box').style.display = 'none';
         document.getElementById('login-error').style.display = 'none';
@@ -942,7 +1110,7 @@ window.doForgotPasswordRequest = async function() {
             }
             
             document.getElementById('forgot-email-step').style.display = 'none';
-            document.getElementById('forgot-code-step').style.display = 'block';
+            document.getElementById('forgot-code-step').style.display = 'flex';
         } catch (e) {
             err.textContent = e.message || 'Falha ao solicitar código';
             err.style.display = 'block';
