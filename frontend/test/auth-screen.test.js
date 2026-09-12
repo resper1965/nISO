@@ -34,6 +34,13 @@ function montaLogin() {
         <button id="mfa-toggle-recovery">Usar código de recuperação</button>
       </div>
       <div class="login-box" id="forgot-password-box" style="display:none"></div>
+      <div class="login-box" id="legal-accept-box" style="display:none"></div>
+      <div class="login-box" id="reauth-box" style="display:none">
+        <span id="reauth-email"></span>
+        <p id="reauth-draft" style="display:none"></p>
+        <input type="password" id="reauth-password">
+        <p id="reauth-error" style="display:none"></p>
+      </div>
     </div>
     <div id="live-region" role="status" aria-live="polite"></div>`;
 }
@@ -240,5 +247,75 @@ describe('segundo fator', () => {
     expect(campo.getAttribute('maxlength')).toBe('6');
     expect(campo.classList.contains('mfa-code')).toBe(true);
     expect(document.getElementById('mfa-login-label').textContent).toBe('Código');
+  });
+});
+
+describe('reautenticação após expirar por inatividade', () => {
+  beforeEach(() => {
+    S.user = { email: 'ana@twyn.com.br' };
+    window.rascunhoPendente = null;
+  });
+
+  it('descreve o rascunho com rótulo em português e plural por palavra inteira', () => {
+    expect(window.descreveRascunho({ registro: 'A.8.12', campos: ['status'] }))
+      .toBe('A.8.12 · 1 alteração não salva — status');
+    expect(window.descreveRascunho({ registro: 'A.8.12', campos: ['status', 'dono'] }))
+      .toBe('A.8.12 · 2 alterações não salvas — status, dono');
+  });
+
+  it('sem rascunho não inventa texto', () => {
+    expect(window.descreveRascunho(null)).toBe('');
+    expect(window.descreveRascunho({ registro: 'A.8.12', campos: [] })).toBe('');
+  });
+
+  it('registrarRascunho sem campos limpa o pendente', () => {
+    window.registrarRascunho('A.8.12', ['status']);
+    expect(window.rascunhoPendente).not.toBeNull();
+    window.registrarRascunho('A.8.12', []);
+    expect(window.rascunhoPendente).toBeNull();
+  });
+
+  it('mostra o cartão com o e-mail da conta e o rascunho preservado', () => {
+    window.registrarRascunho('A.8.12', ['status', 'dono']);
+    window.pedirReautenticacao();
+    expect(document.getElementById('reauth-box').style.display).toBe('flex');
+    expect(document.getElementById('reauth-email').textContent).toBe('ana@twyn.com.br');
+    const linha = document.getElementById('reauth-draft');
+    expect(linha.style.display).toBe('block');
+    expect(linha.textContent).toContain('2 alterações não salvas');
+  });
+
+  it('sem rascunho, a linha de preservado nem aparece', () => {
+    window.pedirReautenticacao();
+    expect(document.getElementById('reauth-draft').style.display).toBe('none');
+  });
+
+  it('esconde os outros cartões: a reautenticação é a única saída', () => {
+    window.pedirReautenticacao();
+    expect(document.getElementById('standard-login-box').style.display).toBe('none');
+    expect(document.getElementById('legal-accept-box').style.display).toBe('none');
+  });
+
+  // Reautenticar NAO re-renderiza a view: o rascunho vive no DOM por baixo, e
+  // redesenhar seria justamente perde-lo.
+  it('entra de novo com a senha e não força re-render', async () => {
+    window.pedirReautenticacao();
+    document.getElementById('reauth-password').value = 'senha-certa';
+    apiMock.mockResolvedValue({ token: 'novo', user: { email: 'ana@twyn.com.br' } });
+    window.render = vi.fn();
+    await window.doReauth();
+    expect(apiMock).toHaveBeenCalledWith('POST', '/api/v1/auth/login', { email: 'ana@twyn.com.br', password: 'senha-certa' });
+    expect(document.getElementById('reauth-box').style.display).toBe('none');
+    expect(window.render).not.toHaveBeenCalled();
+  });
+
+  it('senha errada mantém o cartão e limpa o campo', async () => {
+    window.pedirReautenticacao();
+    document.getElementById('reauth-password').value = 'errada';
+    apiMock.mockRejectedValue(erroApi('E-mail ou senha incorretos. Restam 4 tentativas antes do bloqueio temporário.'));
+    await window.doReauth();
+    expect(document.getElementById('reauth-box').style.display).toBe('flex');
+    expect(document.getElementById('reauth-password').value).toBe('');
+    expect(document.getElementById('reauth-error').textContent).toContain('E-mail ou senha incorretos');
   });
 });

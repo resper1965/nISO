@@ -106,6 +106,31 @@
                 </div>
             </div>
 
+            <!-- Sessão expirada por inatividade. Reautentica AQUI, sem levar
+                 embora o que estava sendo editado. -->
+            <div class="login-box" id="reauth-box" style="display:none">
+                <form onsubmit="doReauth(); return false;" style="display:flex;flex-direction:column;gap:16px">
+                    <div>
+                        <h2 class="login-title">Sessão expirada</h2>
+                        <p class="login-lede">Ficou um tempo sem atividade. Entre de novo para continuar de onde parou.</p>
+                    </div>
+                    <p class="login-note" id="reauth-draft" style="display:none"></p>
+                    <div class="login-field">
+                        <label class="login-label" for="reauth-password">Senha de <span id="reauth-email"></span></label>
+                        <input type="password" id="reauth-password" class="form-input" placeholder="••••••••" autocomplete="current-password" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width:100%">Continuar</button>
+                    <p id="reauth-error" class="login-error" role="alert" style="display:none"></p>
+                    <div style="text-align:center">
+                        <button type="button" class="login-link" onclick="doLogout()">Sair e descartar</button>
+                    </div>
+                </form>
+                <div class="login-sign">
+                    <span class="login-sign-house">ness<span>.</span></span>
+                    <span class="login-sign-links">n.iso 1.8.0</span>
+                </div>
+            </div>
+
             <!-- Aceite de documentos legais atualizados. Aparece quando há
                  pendência MATERIAL: mudança de base legal ou de retenção não
                  se aceita por omissão. -->

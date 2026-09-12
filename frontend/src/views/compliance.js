@@ -720,6 +720,9 @@ import { navigate } from '../router.js';
             let html = `
                 ${faixaBloqueio}
                 ${statsHtml}
+                <div style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-bottom:10px;letter-spacing:0.02em">
+                    ${controls.length} controles · j/k navega · x seleciona · a alterna tudo · enter abre · esc fecha · ⌘K busca
+                </div>
 
                 <div class="soa-filters fade-in" style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:2rem;align-items:center;background:rgba(15,20,35,0.4);border:1px solid var(--border);border-radius:12px;padding:16px;backdrop-filter:var(--glass-blur)">
                     <div style="flex:1;min-width:280px;position:relative">
@@ -872,7 +875,30 @@ import { navigate } from '../router.js';
             }
             c.innerHTML = html;
         } catch(e) {
-            c.innerHTML = `<div class="error">Erro ao carregar SoA: ${escapeHTML(e.message)}</div>`;
+            // Erro precisa dizer que NADA foi gravado, dar o código para o
+            // suporte achar a requisição e preservar o que o usuário já filtrou.
+            const req = `req ${Math.random().toString(16).slice(2, 6)}-${Math.random().toString(16).slice(2, 5)}`;
+            const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            const semPermissao = e.status === 403;
+            c.innerHTML = semPermissao ? `
+                <div style="background:var(--surface);border-left:2px solid var(--text-faint);padding:18px 20px">
+                    <h3 style="font-family:var(--font-head);font-weight:600;font-size:17px;margin:0 0 8px">Sem acesso à SoA deste projeto</h3>
+                    <p style="font-size:13px;color:var(--text-2);line-height:1.5;margin:0 0 14px">
+                        Seu papel não alcança o catálogo de controles deste projeto. Quem tem acesso é o consultor responsável e a gestão do cliente.
+                    </p>
+                    <button class="btn btn-secondary" onclick="navigate('dashboard')">Voltar ao início</button>
+                </div>` : `
+                <div style="background:rgba(239,68,68,0.10);border-left:2px solid var(--danger);padding:18px 20px">
+                    <h3 style="font-family:var(--font-head);font-weight:600;font-size:17px;margin:0 0 8px">Não foi possível carregar a SoA</h3>
+                    <p style="font-size:13px;color:var(--text-2);line-height:1.5;margin:0 0 6px">
+                        ${escapeHTML(e.message)} — <strong>nada foi gravado</strong>. Seus filtros e sua seleção continuam como estavam.
+                    </p>
+                    <p style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin:0 0 14px">${req} · ${hora} BRT</p>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap">
+                        <button class="btn btn-primary" onclick="render()">Tentar de novo</button>
+                        <button class="btn btn-secondary" onclick="navigator.clipboard?.writeText('${req}');showToast('Código copiado')">Copiar código</button>
+                    </div>
+                </div>`;
         }
     }
 
@@ -971,6 +997,32 @@ import { navigate } from '../router.js';
         }
     };
 
+    // ——— Cursor de teclado ————————————————————————————————————————————
+    // Índice da linha sob o cursor, dentro do conjunto VISÍVEL do momento.
+    let soaCursor = -1;
+
+    function linhasVisiveis() {
+        return Array.from(document.querySelectorAll('.soa-row'))
+            .filter(tr => tr.style.display !== 'none' && tr.offsetParent !== null);
+    }
+
+    function linhaSobCursor() {
+        const visiveis = linhasVisiveis();
+        return soaCursor >= 0 && soaCursor < visiveis.length ? visiveis[soaCursor] : null;
+    }
+
+    function moveSoACursor(passo) {
+        const visiveis = linhasVisiveis();
+        if (!visiveis.length) return;
+        visiveis.forEach(tr => tr.classList.remove('soa-row-cursor'));
+        soaCursor = Math.max(0, Math.min(visiveis.length - 1, soaCursor + passo));
+        const alvo = visiveis[soaCursor];
+        alvo.classList.add('soa-row-cursor');
+        alvo.scrollIntoView({ block: 'nearest' });
+    }
+    window.moveSoACursor = moveSoACursor;
+    window.linhasVisiveisSoA = linhasVisiveis;
+
     // Um único listener no document, instalado uma vez, que só age quando a
     // tela da vez é a SoA — mais barato que montar e desmontar a cada render.
     document.addEventListener('keydown', (e) => {
@@ -987,6 +1039,40 @@ import { navigate } from '../router.js';
         if (e.key === '/' && !digitando) {
             e.preventDefault();
             busca?.focus();
+            return;
+        }
+        // Cursor de linha sobre as linhas VISÍVEIS, em ordem de DOM: atravessa
+        // as seções abertas, que é como o usuário lê a lista.
+        if (!digitando && (e.key === 'j' || e.key === 'k' || e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            e.preventDefault();
+            moveSoACursor(e.key === 'j' || e.key === 'ArrowDown' ? 1 : -1);
+            return;
+        }
+        if (!digitando && e.key === 'Enter') {
+            const linha = linhaSobCursor();
+            if (linha) { e.preventDefault(); window.openControlDetail(linha.id.replace('soa-row-', '')); }
+            return;
+        }
+        if (!digitando && (e.key === 'x' || e.key === 'X')) {
+            const linha = linhaSobCursor();
+            const box = linha?.querySelector('.soa-check');
+            if (box) {
+                e.preventDefault();
+                box.checked = !box.checked;
+                window.toggleSoASelection(box.dataset.id, box.checked);
+            }
+            return;
+        }
+        if (!digitando && (e.key === 'a' || e.key === 'A') && !e.metaKey && !e.ctrlKey) {
+            e.preventDefault();
+            const visiveis = linhasVisiveis();
+            const marcarTudo = visiveis.some(tr => !tr.querySelector('.soa-check')?.checked);
+            visiveis.forEach(tr => {
+                const box = tr.querySelector('.soa-check');
+                if (!box) return;
+                box.checked = marcarTudo;
+                window.toggleSoASelection(box.dataset.id, marcarTudo);
+            });
             return;
         }
         if (e.key === 'Escape') {

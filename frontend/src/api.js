@@ -26,17 +26,30 @@ async function api(m, p, b, extras) {
     // jogar o usuário de volta ao login. Estas rotas tratam o próprio erro e
     // precisam da mensagem real do servidor, não de "Unauthorized".
     const autoatendimentoMfa = p.startsWith('/api/v1/auth/mfa/');
-    if (r.status === 401 && p !== '/api/v1/auth/login' && !autoatendimentoMfa) {
-        if (window.doLogout) window.doLogout();
-        throw new Error('Unauthorized');
-    }
+
+    // O corpo é lido UMA vez. A checagem de 401 precisa dele (para separar
+    // sessão expirada de sessão inválida) e o erro logo abaixo também; ler duas
+    // vezes exigiria `clone()`, que nem todo Response de teste implementa.
     const contentType = r.headers.get('content-type') || '';
     let data;
     if (contentType.includes('application/json')) {
         data = await r.json();
     } else {
-        const text = await r.text();
+        await r.text();
         throw new Error(`Resposta HTTP ${r.status} não é JSON (${p})`);
+    }
+
+    if (r.status === 401 && p !== '/api/v1/auth/login' && !autoatendimentoMfa) {
+        // Sessão expirada NÃO é o mesmo que sessão inválida. Expirou por
+        // inatividade: o usuário continua sendo quem era e pode ter edição
+        // aberta na tela — derrubar tudo perde o trabalho dele. Reautentica no
+        // lugar, preservando o rascunho (ver pedirReautenticacao em globals.js).
+        if (data?.expired === 'inactivity' && window.pedirReautenticacao) {
+            window.pedirReautenticacao();
+            throw new Error('Sessão expirada por inatividade');
+        }
+        if (window.doLogout) window.doLogout();
+        throw new Error('Unauthorized');
     }
     if (!r.ok) {
         const err = new Error(data.error || (data.details ? data.details.map(i => i.message).join(', ') : 'API Error'));

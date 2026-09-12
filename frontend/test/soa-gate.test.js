@@ -249,3 +249,47 @@ describe('seleção em lote', () => {
     expect(document.querySelector('.soa-check').checked).toBe(false);
   });
 });
+
+describe('cursor de teclado', () => {
+  function montaLinhas() {
+    document.body.insertAdjacentHTML('beforeend', `
+      <table><tbody>
+        <tr class="soa-row" id="soa-row-c1"><td><input type="checkbox" class="soa-check" data-id="c1"></td></tr>
+        <tr class="soa-row" id="soa-row-c2"><td><input type="checkbox" class="soa-check" data-id="c2"></td></tr>
+        <tr class="soa-row" id="soa-row-c3" style="display:none"><td><input type="checkbox" class="soa-check" data-id="c3"></td></tr>
+      </tbody></table>`);
+    // jsdom nao calcula layout: offsetParent e sempre null. Fingimos o que o
+    // filtro de visibilidade consulta, para o cursor poder ser testado.
+    document.querySelectorAll('.soa-row').forEach(tr => {
+      Object.defineProperty(tr, 'offsetParent', { get: () => (tr.style.display === 'none' ? null : document.body) });
+      tr.scrollIntoView = () => {};
+    });
+  }
+
+  beforeEach(montaLinhas);
+
+  it('pula a linha escondida pelo filtro', () => {
+    expect(window.linhasVisiveisSoA().map(tr => tr.id)).toEqual(['soa-row-c1', 'soa-row-c2']);
+  });
+
+  it('desce e sobe sem sair das pontas', () => {
+    window.moveSoACursor(1);
+    expect(document.querySelector('.soa-row-cursor').id).toBe('soa-row-c1');
+    window.moveSoACursor(1);
+    expect(document.querySelector('.soa-row-cursor').id).toBe('soa-row-c2');
+    // Nao passa do fim.
+    window.moveSoACursor(1);
+    expect(document.querySelector('.soa-row-cursor').id).toBe('soa-row-c2');
+    window.moveSoACursor(-1);
+    expect(document.querySelector('.soa-row-cursor').id).toBe('soa-row-c1');
+    // Nem do comeco.
+    window.moveSoACursor(-1);
+    expect(document.querySelector('.soa-row-cursor').id).toBe('soa-row-c1');
+  });
+
+  it('só uma linha carrega o cursor por vez', () => {
+    window.moveSoACursor(1);
+    window.moveSoACursor(1);
+    expect(document.querySelectorAll('.soa-row-cursor')).toHaveLength(1);
+  });
+});

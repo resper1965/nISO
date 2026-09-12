@@ -539,7 +539,7 @@ window.renderAccountMenu = function renderAccountMenu() {
             <button type="button" role="menuitem" class="account-item" onclick="closeAccountMenu(); openProfileModal()">
                 ${ICON_KEY}<span class="account-item-label">Minha conta e MFA</span>
             </button>
-            <button type="button" role="menuitem" class="account-item" onclick="closeAccountMenu(); navigate('audit-trail')">
+            <button type="button" role="menuitem" class="account-item" onclick="closeAccountMenu(); openSessionTrail()">
                 ${ICON_HISTORY}<span class="account-item-label">Trilha da minha sessão</span>
             </button>
             <div class="account-rule"></div>
@@ -553,6 +553,51 @@ window.renderAccountMenu = function renderAccountMenu() {
                 <span class="account-sign-ver">${NISO_VERSION}</span>
             </div>`;
     }
+
+/**
+ * O percurso desta sessão: senha, segundo fator, bloqueio, aceite. Só o do
+ * próprio usuário — o servidor filtra pelo ator, e não há parâmetro para pedir
+ * o de outra conta.
+ */
+window.openSessionTrail = async function openSessionTrail() {
+        openModal('<div style="padding:1.5rem"><p style="color:var(--text-dim);font-size:0.8rem">Carregando trilha da sessão...</p></div>');
+        let registros = [];
+        try {
+            const res = await api('GET', '/api/v1/auth/sessao/trilha');
+            registros = Array.isArray(res) ? res : (res.registros || []);
+        } catch (e) {
+            openModal(`<div style="padding:1.5rem"><p class="login-error">${escapeHTML(e.message)}</p></div>`);
+            return;
+        }
+
+        const badge = tipo => {
+            const cor = tipo.includes('lockout') ? 'danger'
+                : tipo.includes('password') ? 'warning'
+                : 'info';
+            return window.renderStatusBadge(cor, tipo);
+        };
+
+        openModal(`
+            <div style="padding:1.5rem 1.75rem;max-width:560px">
+                <h3 style="font-family:var(--font-head);font-weight:600;font-size:17px;margin:0 0 4px">Trilha da minha sessão</h3>
+                <p style="font-size:12.5px;color:var(--text-2);margin:0 0 16px">Os eventos de autenticação da sua conta, do mais recente para o mais antigo.</p>
+                ${registros.length ? `
+                    <div style="border:1px solid var(--border)">
+                        ${registros.map(r => `
+                            <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start">
+                                <span style="flex-shrink:0">${badge(r.tipo || 'evento')}</span>
+                                <span style="flex:1;min-width:0;font-size:12.5px;color:var(--text-2);line-height:1.5">
+                                    ${escapeHTML(r.descricao || '')}
+                                    <span style="display:block;font-family:var(--font-mono);font-size:10px;color:var(--text-dim);margin-top:2px">${escapeHTML(r.quando || '')}</span>
+                                </span>
+                            </div>`).join('')}
+                    </div>`
+                    : '<p style="font-size:12.5px;color:var(--text-dim)">Nenhum evento de autenticação registrado ainda.</p>'}
+                <div style="display:flex;justify-content:flex-end;margin-top:18px">
+                    <button class="btn btn-secondary" onclick="closeModal()">Fechar</button>
+                </div>
+            </div>`);
+    };
 
 window.closeAccountMenu = function closeAccountMenu() {
         const box = document.getElementById('account-menu');
@@ -983,6 +1028,75 @@ window.loadAll = async function loadAll() {
             } catch(e) {}
         }
     }
+
+// ——— Reautenticação após expirar por inatividade ——————————————————————
+// Expirar por inatividade não é o mesmo que sessão inválida: o usuário continua
+// sendo quem era e pode ter edição aberta. Derrubar tudo perderia o trabalho —
+// por isso a reautenticação acontece AQUI, preservando o rascunho.
+
+/** Rascunho preservado durante a reautenticação, em PT-BR e por registro. */
+window.rascunhoPendente = null;
+
+/**
+ * Declara o que está sendo editado, para a tela de expiração poder dizer o que
+ * está preservado. `campos` são RÓTULOS em português, nunca as chaves internas.
+ */
+window.registrarRascunho = function registrarRascunho(registro, campos) {
+        window.rascunhoPendente = (campos && campos.length) ? { registro, campos } : null;
+    };
+
+/** Plural pela palavra inteira, não por sufixo: "alteração"/"alterações". */
+function descreveRascunho(r) {
+        if (!r || !r.campos || !r.campos.length) return '';
+        const n = r.campos.length;
+        const palavra = n === 1 ? 'alteração não salva' : 'alterações não salvas';
+        return `${r.registro} · ${n} ${palavra} — ${r.campos.join(', ')}`;
+    }
+window.descreveRascunho = descreveRascunho;
+
+window.pedirReautenticacao = function pedirReautenticacao() {
+        const caixa = document.getElementById('reauth-box');
+        if (!caixa || caixa.style.display === 'flex') return;
+
+        const email = document.getElementById('reauth-email');
+        if (email) email.textContent = (S.user && S.user.email) || 'sua conta';
+
+        const linha = document.getElementById('reauth-draft');
+        const texto = descreveRascunho(window.rascunhoPendente);
+        if (linha) {
+            linha.style.display = texto ? 'block' : 'none';
+            linha.textContent = texto ? `Preservado: ${texto}` : '';
+        }
+
+        ['standard-login-box', 'first-login-reset-box', 'mfa-login-box', 'forgot-password-box', 'legal-accept-box']
+            .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+        caixa.style.display = 'flex';
+        document.getElementById('login-overlay').classList.remove('hidden');
+        document.getElementById('reauth-password')?.focus();
+    };
+
+window.doReauth = async function doReauth() {
+        const senha = document.getElementById('reauth-password').value;
+        const err = document.getElementById('reauth-error');
+        if (err) err.style.display = 'none';
+        try {
+            const res = await api('POST', '/api/v1/auth/login', { email: S.user?.email, password: senha });
+            S.token = res.token;
+            S.user = res.user;
+            localStorage.setItem('niso_token', res.token);
+            localStorage.setItem('niso_user', JSON.stringify(res.user));
+            document.getElementById('reauth-box').style.display = 'none';
+            document.getElementById('standard-login-box').style.display = 'flex';
+            document.getElementById('reauth-password').value = '';
+            document.getElementById('login-overlay').classList.add('hidden');
+            // NÃO re-renderiza a view: o rascunho vive no DOM da tela por baixo,
+            // e redesenhar seria justamente perdê-lo.
+            showToast('Sessão retomada');
+        } catch (e) {
+            if (err) { err.style.display = 'block'; err.textContent = e.message; }
+            document.getElementById('reauth-password').value = '';
+        }
+    };
 
 // ——— Aceite de documentos legais ——————————————————————————————————————
 // Versão nova apenas AVISA quando a mudança é comum, e BARRA o acesso quando é

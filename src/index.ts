@@ -8,6 +8,7 @@ import { log, requestId, metrica, resumoErro } from './observability';
 import { queryCapMiddleware } from './middleware/query-cap';
 import { bodyGuard } from './middleware/body-guard';
 import { rateLimitMiddleware } from './middleware/rate-limit';
+import { sessaoApp } from './routes/auth';
 import { authApp } from './routes/auth';
 import { usersApp } from './routes/users';
 import { leadsApp } from './routes/leads';
@@ -194,6 +195,7 @@ app.route('/api/v1/admin/users', usersApp);
 
 // MFA fica DEPOIS do authMiddleware: exige sessão de senha já estabelecida.
 app.route('/api/v1/auth/mfa', mfaApp);
+app.route('/api/v1/auth/sessao', sessaoApp);
 
 app.route('/api/v1/leads', leadsApp);
 app.route('/api/v1/proposals', proposalsApp);

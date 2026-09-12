@@ -905,6 +905,9 @@
 
         .soa-check, .soa-check-all { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; }
         .soa-row:has(.soa-check:checked) { background: rgba(0, 173, 232, 0.07); }
+        /* Linha sob o cursor de TECLADO: precisa se distinguir da selecionada,
+           senao nao da para saber onde o `x` vai agir. */
+        .soa-row-cursor { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--accent); }
 
         /* Barra de lote: aparece só com seleção. Precisa quebrar linha, senão o
            ✕ some quando o texto da contagem cresce. */

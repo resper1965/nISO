@@ -333,3 +333,41 @@ authApp.post('/change-password', async (c) => {
     return erro500(c, 'Falha ao alterar senha', e);
   }
 });
+
+// Router PRÓPRIO: `/api/v1/auth` é montado ANTES do authMiddleware (é por onde
+// se entra), então `c.get('user')` ali é sempre undefined. Este vai montado
+// depois, como o de MFA já fazia.
+export const sessaoApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+/**
+ * Trilha da própria sessão: o percurso que o usuário fez para entrar (senha,
+ * segundo fator, bloqueio, aceite). Montada a partir da trilha de auditoria.
+ *
+ * Escopada ao ATOR de propósito: cada um vê o seu percurso, e não o de ninguém.
+ * Sem esse filtro seria um leitor de trilha alheia disfarçado.
+ */
+sessaoApp.get('/trilha', async (c) => {
+  try {
+    const user = c.get('user');
+    if (!user) return c.json({ error: 'Não autorizado' }, 401);
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT action, details, created_at
+         FROM audit_logs
+        WHERE actor = ? AND action LIKE 'auth.%'
+        ORDER BY created_at DESC
+        LIMIT 20`
+    ).bind(user.email).all();
+
+    return c.json({
+      ok: true,
+      registros: (results || []).map((r: any) => ({
+        tipo: String(r.action).replace(/^auth\./, ''),
+        descricao: r.details,
+        quando: r.created_at,
+      })),
+    });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao ler a trilha da sessão', e);
+  }
+});
