@@ -111,13 +111,20 @@
     </div>
 
     <nav class="sidebar" id="sidebar" aria-label="Navegação principal">
-        <div class="sidebar-logo">n<span style="color:var(--accent)">.</span>iso</div>
-        <div style="padding: 0 1rem 1.2rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 0.8rem;" id="sidebar-project-selector-container">
-            <label style="font-size: 0.65rem; text-transform: uppercase; color: var(--text-dim); letter-spacing: 1px; display: block; margin-bottom: 0.4rem; font-family:'Montserrat',sans-serif; font-weight:500;">Projeto Ativo</label>
-            <select class="form-input" id="sidebar-project-select" onchange="window.changeActiveProject(this.value)" style="background: rgba(7, 11, 20, 0.6); border: 1px solid rgba(0, 173, 232, 0.2); color: var(--text); padding: 0.4rem 0.6rem; font-size: 0.8rem; height: auto; cursor: pointer; width: 100%; border-radius: 8px; backdrop-filter: blur(8px);">
+        <div class="sidebar-logo">
+            <span class="sidebar-logo-mark" id="sidebar-logo-mark">n<span style="color:var(--accent)">.</span><span class="brand-tail">iso</span></span>
+            <button type="button" class="sidebar-toggle" id="toggle-sidebar" onclick="toggleSidebar()" aria-label="Recolher navegação" aria-expanded="true" title="Recolher"><span id="toggle-sidebar-svg" aria-hidden="true">&#171;</span></button>
+        </div>
+        <div id="sidebar-project-selector-container">
+            <select id="sidebar-project-select" onchange="window.changeActiveProject(this.value)" aria-label="Projeto ativo">
                 <option value="">Selecione um projeto...</option>
             </select>
-            <a href="#" onclick="navigate('projects'); return false;" style="font-size:0.7rem; color:var(--accent); text-decoration:none; display:inline-block; margin-top:6px; font-weight:500;">Gerenciar Projetos</a>
+            <div class="tenant-face" aria-hidden="true">
+                <span class="tenant-initials" id="tenant-initials">—</span>
+                <span class="tenant-name" id="tenant-name">Selecione um projeto</span>
+                <span class="tenant-norm" id="tenant-norm"></span>
+                <span class="tenant-caret">&#9662;</span>
+            </div>
         </div>
         <div class="sidebar-nav-list">
             <div class="sidebar-nav active" id="nav-dashboard" onclick="navigate('dashboard')">
@@ -263,22 +270,15 @@
             </div>
         </div>
         <div class="sidebar-bottom">
-            <!-- Perfil de Usuário no Sidebar -->
-            <div class="sidebar-user-card" id="sidebar-user-card" onclick="openProfileModal()">
-                <div class="sidebar-user-avatar" id="sidebar-user-avatar">C</div>
-                <div class="sidebar-user-info">
-                    <div class="sidebar-user-name" id="sidebar-user-name">Consultor</div>
-                    <div class="sidebar-user-role" id="sidebar-user-role">Administrador</div>
-                </div>
-                <div class="sidebar-user-logout" onclick="doLogout(); event.stopPropagation()" title="Sair" role="button" aria-label="Sair da conta">
-                    <svg viewBox="0 0 24 24" style="width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-                </div>
-            </div>
-            <div class="sidebar-brand">
-                <span>n<span style="color:var(--accent)">.</span>iso</span>
-                <span class="sidebar-version-badge" style="font-size:0.65rem; color:var(--accent); font-weight:500; font-family:inherit; background:rgba(0,173,232,0.1); border:1px solid rgba(0,173,232,0.25); padding:1px 6px; border-radius:4px">v1.8.0</span>
-            </div>
-            <div class="sidebar-status"></div>
+            <button type="button" class="sidebar-user-card" id="sidebar-user-card" onclick="toggleAccountMenu()" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu">
+                <span class="sidebar-user-avatar" id="sidebar-user-avatar">C</span>
+                <span class="sidebar-user-info">
+                    <span class="sidebar-user-name" id="sidebar-user-name">Consultor</span>
+                    <span class="sidebar-user-role" id="sidebar-user-role">Administrador</span>
+                </span>
+                <span class="sidebar-user-caret" aria-hidden="true">&#9652;</span>
+            </button>
+            <div class="account-menu" id="account-menu" role="menu" aria-labelledby="sidebar-user-card" hidden></div>
         </div>
     </nav>
 

@@ -248,15 +248,18 @@ window.openPricingOverrideModal = function openPricingOverrideModal(id) {
 window.toggleSidebar = function toggleSidebar() {
         const sb = document.getElementById('sidebar');
         sb.classList.toggle('collapsed');
-        const textEl = document.getElementById('toggle-sidebar-text');
-        const svgEl = document.getElementById('toggle-sidebar-svg');
-        if (sb.classList.contains('collapsed')) {
-            if (textEl) textEl.textContent = 'Expandir';
-            if (svgEl) svgEl.innerHTML = '<polyline points="13 7 18 12 13 17"/><polyline points="6 7 11 12 6 17"/>';
-        } else {
-            if (textEl) textEl.textContent = 'Recolher';
-            if (svgEl) svgEl.innerHTML = '<polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>';
+        const collapsed = sb.classList.contains('collapsed');
+        const btn = document.getElementById('toggle-sidebar');
+        const glyphEl = document.getElementById('toggle-sidebar-svg');
+        const label = collapsed ? 'Expandir' : 'Recolher';
+        if (glyphEl) glyphEl.textContent = collapsed ? '»' : '«';
+        if (btn) {
+            btn.title = label;
+            btn.setAttribute('aria-label', label + ' navegação');
+            btn.setAttribute('aria-expanded', String(!collapsed));
         }
+        // Recolhida o menu de conta não cabe ancorado no rodapé estreito.
+        if (collapsed && typeof closeAccountMenu === 'function') closeAccountMenu();
     }
 
 window.toggleContext = function toggleContext() {
@@ -300,7 +303,137 @@ window.updateSidebarProjectSelector = function updateSidebarProjectSelector() {
         } else {
             selectEl.value = '';
         }
+        updateTenantFace();
     }
+
+// A face visível do seletor: uma linha de 34px com nome + norma + caret. O
+// <select> nativo continua por cima, invisível, para não reimplementar um
+// combobox acessível. Fase, prazo e percentual NÃO entram aqui: esse contexto
+// pertence à Jornada e ao Dashboard.
+window.updateTenantFace = function updateTenantFace() {
+        const nameEl = document.getElementById('tenant-name');
+        if (!nameEl) return;
+        const normEl = document.getElementById('tenant-norm');
+        const initialsEl = document.getElementById('tenant-initials');
+        const p = S.activeProject;
+        const name = p ? (p.project_name || p.client_name || 'Projeto') : 'Selecione um projeto';
+        nameEl.textContent = name;
+        if (normEl) normEl.textContent = p ? (p.standard || p.standards || 'ISO 27001:2022') : '';
+        if (initialsEl) initialsEl.textContent = p ? name.slice(0, 2).toUpperCase() : '—';
+    }
+
+// ——— Menu de conta ——————————————————————————————————————————————————
+// Substitui o botão de logout solto no card: encerrar sessão é uma decisão,
+// não um alvo de 28px ao lado do nome. Abre pelo card, fecha com Esc e com
+// clique fora.
+// ponytail: sem item "Tema". O toggle foi removido de propósito (ver o topo
+// deste arquivo) — não existe CSS de tema claro, e item que não faz nada é
+// pior que item ausente.
+const NISO_VERSION = 'n.iso 1.8.0';
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || '');
+const LOGOUT_SHORTCUT = IS_MAC ? '⇧⌘Q' : '⇧Ctrl+Q';
+
+const ICON_KEY = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8.5-8.5"/><path d="m17 6 3 3"/></svg>';
+const ICON_HISTORY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>';
+const ICON_LOGOUT = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>';
+const ICON_CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+
+window.renderAccountMenu = function renderAccountMenu() {
+        const box = document.getElementById('account-menu');
+        if (!box) return;
+        const u = S.user || {};
+        const name = u.name || u.email || 'Consultor';
+        const initials = name.trim().slice(0, 2).toUpperCase();
+        const tenants = Array.isArray(S.projects) ? S.projects : [];
+        const activeId = S.activeProject ? S.activeProject.id : '';
+
+        const tenantRows = tenants.map(p => {
+            const label = p.project_name || p.client_name || p.id;
+            const norm = p.standard || p.standards || '';
+            const current = String(p.id) === String(activeId);
+            return `<button type="button" role="menuitemradio" aria-checked="${current}" class="account-item${current ? ' is-current' : ''}" onclick="changeActiveProject('${escapeHTML(String(p.id))}'); closeAccountMenu()">
+                <span class="account-item-check">${current ? ICON_CHECK : ''}</span>
+                <span class="account-item-label">${escapeHTML(label)}</span>
+                <span class="account-item-aside">${escapeHTML(norm)}</span>
+            </button>`;
+        }).join('');
+
+        box.innerHTML = `
+            <div class="account-id">
+                <span class="account-id-tile">${escapeHTML(initials)}</span>
+                <span class="account-id-text">
+                    <span class="account-id-name">${escapeHTML(name)}</span>
+                    <span class="account-id-mail">${escapeHTML(u.email || '')}</span>
+                </span>
+            </div>
+            <div class="account-rule"></div>
+            ${tenantRows ? `<div class="account-group">Tenant</div>${tenantRows}<div class="account-rule"></div>` : ''}
+            <button type="button" role="menuitem" class="account-item" onclick="closeAccountMenu(); openProfileModal()">
+                ${ICON_KEY}<span class="account-item-label">Minha conta e MFA</span>
+            </button>
+            <button type="button" role="menuitem" class="account-item" onclick="closeAccountMenu(); navigate('audit-trail')">
+                ${ICON_HISTORY}<span class="account-item-label">Trilha da minha sessão</span>
+            </button>
+            <div class="account-rule"></div>
+            <button type="button" role="menuitem" class="account-item danger" onclick="closeAccountMenu(); doLogout()">
+                ${ICON_LOGOUT}<span class="account-item-label">Encerrar sessão</span>
+                <span class="account-item-aside">${LOGOUT_SHORTCUT}</span>
+            </button>
+            <div class="account-rule"></div>
+            <div class="account-sign">
+                <span class="account-sign-house">ness<span>.</span></span>
+                <span class="account-sign-ver">${NISO_VERSION}</span>
+            </div>`;
+    }
+
+window.closeAccountMenu = function closeAccountMenu() {
+        const box = document.getElementById('account-menu');
+        const card = document.getElementById('sidebar-user-card');
+        if (box) box.hidden = true;
+        if (card) card.setAttribute('aria-expanded', 'false');
+    }
+
+window.toggleAccountMenu = function toggleAccountMenu() {
+        const box = document.getElementById('account-menu');
+        const card = document.getElementById('sidebar-user-card');
+        if (!box) return;
+        if (!box.hidden) { closeAccountMenu(); return; }
+        // Na trilha de 72px o popover não cabe: expande antes de abrir.
+        const sb = document.getElementById('sidebar');
+        if (sb && sb.classList.contains('collapsed')) toggleSidebar();
+        renderAccountMenu();
+        box.hidden = false;
+        if (card) card.setAttribute('aria-expanded', 'true');
+        const first = box.querySelector('.account-item');
+        if (first) first.focus();
+    }
+
+document.addEventListener('click', (e) => {
+        const box = document.getElementById('account-menu');
+        if (!box || box.hidden) return;
+        if (e.target.closest('#account-menu') || e.target.closest('#sidebar-user-card')) return;
+        closeAccountMenu();
+    });
+
+document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            const box = document.getElementById('account-menu');
+            if (box && !box.hidden) {
+                closeAccountMenu();
+                const card = document.getElementById('sidebar-user-card');
+                if (card) card.focus();
+                // Cascata do Esc: o menu de conta é o primeiro da fila e
+                // consome a tecla — não cai no fechamento de modal logo abaixo.
+                e.stopImmediatePropagation();
+            }
+            return;
+        }
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'Q' || e.key === 'q')) {
+            e.preventDefault();
+            closeAccountMenu();
+            doLogout();
+        }
+    });
 
 window.updateHeaderUser = function updateHeaderUser() {
         const avatarEl = document.getElementById('sidebar-user-avatar');
