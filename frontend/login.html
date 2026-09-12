@@ -297,7 +297,11 @@
             </div>
         </header>
         <div style="display:flex;flex:1;overflow:hidden">
-            <div class="content" id="content" style="flex:1;overflow-y:auto;padding:2rem" aria-live="polite"></div>
+            <!-- `aria-live` saiu do #content: o container troca de innerHTML
+                 inteiro a cada navegação, então o leitor de tela lia a view
+                 toda e o toast ficava enterrado no meio. O anúncio agora tem
+                 região própria (#live-region), montada e vazia. -->
+            <div class="content" id="content" style="flex:1;overflow-y:auto;padding:2rem"></div>
             <div class="context-panel collapsed" id="context-panel">
                 <button class="toggle-context" onclick="toggleContext()" aria-label="Fechar painel de contexto">x</button>
                 <div class="ctx-inner" id="ctx-content"></div>
@@ -321,6 +325,11 @@
         </div>
     </div>
 
+
+    <!-- Região de anúncio permanente e VAZIA. Leitor de tela só anuncia
+         mudança de conteúdo numa região que já estava no DOM; criar a região
+         junto da mensagem não anuncia nada. showToast escreve aqui. -->
+    <div id="live-region" class="sr-only" role="status" aria-live="polite"></div>
 
     <script type="module" src="/src/main.js"></script>
 </body>
