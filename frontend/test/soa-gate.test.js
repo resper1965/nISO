@@ -293,3 +293,24 @@ describe('cursor de teclado', () => {
     expect(document.querySelectorAll('.soa-row-cursor')).toHaveLength(1);
   });
 });
+
+describe('paginação explícita', () => {
+  beforeEach(() => { window.soaPaginas = {}; window.render = vi.fn(); });
+
+  it('avança de 25 em 25, e não para o total de uma vez', () => {
+    window.carregarMaisSoA('ISO_27001-A.5');
+    expect(window.soaPaginas['ISO_27001-A.5']).toBe(50);
+    window.carregarMaisSoA('ISO_27001-A.5');
+    expect(window.soaPaginas['ISO_27001-A.5']).toBe(75);
+  });
+
+  it('cada seção tem a própria página: abrir mais em A.5 não mexe em A.8', () => {
+    window.carregarMaisSoA('ISO_27001-A.5');
+    expect(window.soaPaginas['ISO_27001-A.8']).toBeUndefined();
+  });
+
+  it('pede re-render para a lista crescer', () => {
+    window.carregarMaisSoA('ISO_27001-A.5');
+    expect(window.render).toHaveBeenCalled();
+  });
+});

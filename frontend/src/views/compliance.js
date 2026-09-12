@@ -576,6 +576,9 @@ import { navigate } from '../router.js';
     // causa delas bloquearia todo projeto já existente sem ganho de conformidade.
     const MIN_NA_JUSTIFICATION = 40;
 
+    /** Tamanho da página da SoA. Paginação explícita, nunca rolagem infinita. */
+    const SOA_POR_PAGINA = 25;
+
     // A numeração do Anexo A é a ordem de leitura do auditor e a ordem do
     // relatório exportado: A.5.7 vem antes de A.5.15, A.8.2 antes de A.8.11.
     // Comparação de string inverte as duas e isso é defeito de conteúdo.
@@ -799,7 +802,15 @@ import { navigate } from '../router.js';
                                         <tbody>
                     `;
 
-                    subData.controls.forEach(ctrl => {
+                    // Paginação EXPLÍCITA, não rolagem infinita: na SoA o usuário
+                    // precisa saber onde está no catálogo. A unidade aqui é a
+                    // seção do Anexo A, que é como o auditor lê — e só A.5 (37
+                    // controles) e A.8 (34) passam de uma página.
+                    window.soaPaginas = window.soaPaginas || {};
+                    const mostrados = window.soaPaginas[sectionId] || SOA_POR_PAGINA;
+                    const restantes = Math.max(0, subData.controls.length - mostrados);
+
+                    subData.controls.slice(0, mostrados).forEach(ctrl => {
                         const parsed = parseControlTitle(ctrl);
                         const isNA = ctrl.status === 'Not Applicable';
                         const trace = traceMap[ctrl.id] || { risks: [], evidence: [] };
@@ -867,6 +878,14 @@ import { navigate } from '../router.js';
                     html += `
                                         </tbody>
                                     </table>
+                                    ${restantes > 0 ? `
+                                        <div style="display:flex;align-items:center;gap:12px;padding:14px 10px">
+                                            <span style="flex:1;height:1px;background:var(--border)"></span>
+                                            <button class="btn btn-secondary" onclick="window.carregarMaisSoA('${sectionId}')">
+                                                Carregar mais ${Math.min(SOA_POR_PAGINA, restantes)} · ${restantes} ${restantes === 1 ? 'restante' : 'restantes'}
+                                            </button>
+                                            <span style="flex:1;height:1px;background:var(--border)"></span>
+                                        </div>` : ''}
                                 </div>
                             </div>
                         </div>
@@ -1088,6 +1107,12 @@ import { navigate } from '../router.js';
             if (soaSelection().size) window.clearSoASelection();
         }
     });
+
+    window.carregarMaisSoA = function(sectionId) {
+        window.soaPaginas = window.soaPaginas || {};
+        window.soaPaginas[sectionId] = (window.soaPaginas[sectionId] || SOA_POR_PAGINA) + SOA_POR_PAGINA;
+        render();
+    };
 
     window.toggleSoAAccordion = function(sectionId) {
         const el = document.getElementById(`soa-acc-${sectionId}`);
