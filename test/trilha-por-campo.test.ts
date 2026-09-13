@@ -1,12 +1,17 @@
 // Trilha por campo: `campo: antes → depois`, agrupamento de lote pelo
 // operation_id, e o desfazer que NÃO apaga linha.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { env } from 'cloudflare:test';
 import {
   ACAO_DESFEITA,
   apenasMudancas,
   colapsaDesfeitas,
   valorParaTrilha,
+  registrarAlteracoes,
+  registrarDesfazer,
+  lerTrilha,
 } from '../src/trilha-campo';
+import { applySchema, resetData } from './helpers/d1';
 
 describe('regra: null de CMMI vira —, nunca a palavra "null"', () => {
   it('vazio, null e undefined viram o travessão', () => {
@@ -83,5 +88,55 @@ describe('regra: desfazer esconde a operação da leitura, sem apagar linha', ()
       { acao: ACAO_DESFEITA, operacao: 'op-1', campo: null },
     ];
     expect(colapsaDesfeitas(avulsa)).toHaveLength(1);
+  });
+});
+
+describe('ida e volta no banco: gravar, ler, desfazer', () => {
+  beforeAll(async () => {
+    await applySchema();
+    await resetData();
+  });
+
+  it('grava uma linha por campo com o mesmo operation_id, e a leitura marca o lote', async () => {
+    const op = await registrarAlteracoes(env.DB, {
+      acao: 'control.updated', autor: 'c@x', entidade: 'compliance_controls', entidadeId: 'ctl-1',
+      alteracoes: [
+        { campo: 'Status', antes: 'Gap', depois: 'Implementado' },
+        { campo: 'CMMI', antes: null, depois: 3 },
+        { campo: 'Dono', antes: 'a', depois: 'a' }, // não mudou: não entra
+      ],
+    });
+    expect(op).toBeTruthy();
+
+    const trilha = await lerTrilha(env.DB, 'compliance_controls', 'ctl-1');
+    expect(trilha).toHaveLength(2);
+    expect(trilha.every(r => r.operacao === op && r.itensNaOperacao === 2)).toBe(true);
+    expect(trilha.map(r => `${r.campo}: ${r.antes} → ${r.depois}`).sort()).toEqual([
+      'CMMI: — → 3',
+      'Status: Gap → Implementado',
+    ]);
+  });
+
+  it('sem mudança não há operação', async () => {
+    const op = await registrarAlteracoes(env.DB, {
+      acao: 'control.updated', autor: 'c@x', entidade: 'compliance_controls', entidadeId: 'ctl-2',
+      alteracoes: [{ campo: 'Status', antes: 'Gap', depois: 'Gap' }],
+    });
+    expect(op).toBeNull();
+    expect(await lerTrilha(env.DB, 'compliance_controls', 'ctl-2')).toEqual([]);
+  });
+
+  it('desfazer some da leitura mas as linhas continuam no banco', async () => {
+    const op = (await registrarAlteracoes(env.DB, {
+      acao: 'control.updated', autor: 'c@x', entidade: 'compliance_controls', entidadeId: 'ctl-3',
+      alteracoes: [{ campo: 'Status', antes: 'Gap', depois: 'Implementado' }],
+    })) as string;
+    await registrarDesfazer(env.DB, { autor: 'c@x', operacao: op, entidade: 'compliance_controls', entidadeId: 'ctl-3' });
+
+    expect(await lerTrilha(env.DB, 'compliance_controls', 'ctl-3')).toEqual([]);
+    const cru = await env.DB.prepare(
+      `SELECT action FROM audit_logs WHERE entity_id = 'ctl-3' ORDER BY action`
+    ).all<{ action: string }>();
+    expect(cru.results.map(r => r.action)).toEqual(['control.updated', ACAO_DESFEITA]);
   });
 });
