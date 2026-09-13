@@ -18,6 +18,21 @@
 	"observability": {
 		"enabled": true
 	},
+
+	// Identifica a versão publicada em `/health` (item 0.2). Binding nativo: não
+	// exige build step, e distingue dois deploys do MESMO commit — re-run do
+	// workflow, ou rollback e volta.
+	"version_metadata": {
+		"binding": "CF_VERSION_METADATA"
+	},
+
+	// Cron de manutenção (ver src/manutencao.ts). Diário às 04:10 UTC — fora do
+	// horário comercial no Brasil e deslocado da hora cheia, onde a fila de cron
+	// da Cloudflare é mais disputada. É a PRIMEIRA execução periódica do
+	// sistema; até aqui nada rodava sozinho.
+	"triggers": {
+		"crons": ["10 4 * * *"]
+	},
 	"upload_source_maps": true,
 
 	/**
@@ -41,6 +56,14 @@
 		{
 			"binding": "STORAGE",
 			"bucket_name": "niso-evidence"
+		},
+		{
+			// Trilha de auditoria arquivada (src/trilha.ts). Bucket SEPARADO do de
+			// evidências de propósito: o ponto do item 4.4 é a trilha viver fora do
+			// alcance de quem administra o banco, e um token com escopo só do
+			// bucket de evidência não deve conseguir reescrevê-la.
+			"binding": "TRILHA",
+			"bucket_name": "niso-trilha"
 		}
 	],
 	"vectorize": [
@@ -66,9 +89,99 @@
 		}
 	],
 
+	/**
+	 * Ambiente de STAGING (item 2.1 do enterprise-grade-plan.md).
+	 *
+	 * Existe por um motivo específico: migration em produção é o caminho sem
+	 * volta deste sistema — D1 não tem rollback, e a recuperação é restaurar
+	 * backup. Staging é onde a migration é ENSAIADA antes de tocar dado de
+	 * cliente.
+	 *
+	 * O que ele NÃO tem, e por quê:
+	 *
+	 *   - `vectorize`: a base de conhecimento (RAG) é o único binding que não faz
+	 *     sentido duplicar para ensaio de migration, e apontar staging para o
+	 *     índice de produção faria ingestão de teste gravar vetor no índice do
+	 *     cliente. Sem o binding, as rotas de IA que usam RAG falham em staging —
+	 *     é limitação declarada, não descuido.
+	 *   - `triggers`: DESLIGADO explicitamente com uma lista vazia. Este
+	 *     comentário afirmava antes que o cron "não é herdado pelo env" — errado,
+	 *     e o primeiro deploy de staging mostrou: ele subiu com
+	 *     `schedule: 10 4 * * *`. Dois workers apagando linha em bancos
+	 *     diferentes é ruído, e a rotina tem teste próprio.
+	 *   - `assets`: herda o de cima (mesmo build do frontend).
+	 *
+	 * `ENVIRONMENT` = "staging" muda o comportamento de código que já lê essa
+	 * var — é o mesmo mecanismo do ambiente de teste.
+	 */
+	"env": {
+		"staging": {
+			"vars": {
+				"ENVIRONMENT": "staging"
+			},
+			"triggers": {
+				"crons": []
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "niso-db-staging",
+					"database_id": "59298065-af65-40b5-8e17-c67859974ed4",
+					"migrations_dir": "migrations"
+				}
+			],
+			"kv_namespaces": [
+				{
+					"binding": "SESSIONS",
+					"id": "65176c8eef4140f7a64cb366a66311b4"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "STORAGE",
+					"bucket_name": "niso-evidence-staging"
+				},
+				{
+					// Em staging aponta para o MESMO bucket de produção? Não: para o
+					// de staging. Trilha de teste encadeada na trilha real quebraria a
+					// cadeia de produção — que é justamente o que ela existe para
+					// detectar.
+					"binding": "TRILHA",
+					"bucket_name": "niso-trilha-staging"
+				}
+			],
+			"ai": {
+				"binding": "AI",
+				"gateway": {
+					"id": "n-iso"
+				}
+			},
+			"analytics_engine_datasets": [
+				{
+					"binding": "ANALYTICS",
+					"dataset": "niso_metrics_staging"
+				}
+			],
+			"observability": {
+				"enabled": true
+			},
+			"upload_source_maps": true
+		}
+	},
+
 	// SETUP_KEY é um segredo: configure com `npx wrangler secret put SETUP_KEY`.
 	// Sem ele, o endpoint POST /api/v1/auth/setup fica desabilitado (falha fechada).
+	// TOKEN_ENC_KEY (segredo) cifra repository_token em repouso (AES-GCM):
+	// `npx wrangler secret put TOKEN_ENC_KEY`. Sem ele, o token é gravado em texto
+	// claro (fallback legado). Após provisionar, rode uma vez
+	// `POST /api/v1/projects/admin/encrypt-tokens` (platform_admin) para migrar o legado.
 	"vars": {
-		"ENVIRONMENT": "production"
+		"ENVIRONMENT": "production",
+		// Chave PÚBLICA de verificação dos exports de portabilidade (item 4.6).
+		// É `var` e não `secret` DE PROPÓSITO: ela existe para ser publicada — o
+		// Worker a serve em `GET /api/v1/public/export-public-key`, e quem recebe
+		// um export precisa dela para conferir a assinatura. A privada
+		// correspondente (`EXPORT_SIGNING_KEY`) é secret e nunca sai daqui.
+		"EXPORT_PUBLIC_KEY": "{\"alg\":\"Ed25519\",\"crv\":\"Ed25519\",\"x\":\"O3ZgAaEwY6Z1dpYvyFhSiLiC3zCug94vydjMfRrAuGs\",\"kty\":\"OKP\"}"
 	}
 }

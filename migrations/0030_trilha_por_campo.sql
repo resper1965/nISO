@@ -1,4 +1,4 @@
--- Migration 0025: trilha por CAMPO.
+-- Migration 0030: trilha por CAMPO.
 --
 -- `audit_logs.details` é texto livre: diz que "o controle X foi atualizado",
 -- não O QUE mudou. O auditor precisa de `campo: antes → depois`, e a tela de

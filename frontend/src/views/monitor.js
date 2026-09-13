@@ -50,17 +50,17 @@ import { navigate } from '../router.js';
                     <div class="monitor-card">
                         <div class="monitor-card-title">Fases Concluídas</div>
                         <div class="monitor-card-value">${completedPhases} / ${totalPhases}</div>
-                        <div style="font-size:0.65rem; color:var(--text-dim)">Fases da jornada de adequação</div>
+                        <div style="font-size:0.75rem; color:var(--text-dim)">Fases da jornada de adequação</div>
                     </div>
                     <div class="monitor-card">
                         <div class="monitor-card-title">Riscos Mapeados</div>
                         <div class="monitor-card-value">${p.risk_count || 0}</div>
-                        <div style="font-size:0.65rem; color:var(--text-dim)">Identificados e mitigados</div>
+                        <div style="font-size:0.75rem; color:var(--text-dim)">Identificados e mitigados</div>
                     </div>
                     <div class="monitor-card">
                         <div class="monitor-card-title">Evidências Coletadas</div>
                         <div class="monitor-card-value">${p.evidence_count || 0}</div>
-                        <div style="font-size:0.65rem; color:var(--text-dim)">Documentos na nuvem R2</div>
+                        <div style="font-size:0.75rem; color:var(--text-dim)">Documentos na nuvem R2</div>
                     </div>
                 </div>
             `;
@@ -97,7 +97,7 @@ import { navigate } from '../router.js';
                         </div>
                         <div class="roadmap-nodes-row">
                             ${jPhases.map(ph => `
-                                <div class="roadmap-node ${ph.status}" onclick="navigate('project-detail', {currentProject: {id:'${p.id}'}})">
+                                <div class="roadmap-node ${ph.status}" data-action="navigate" data-args='["project-detail",{"currentProject":{"id":"${p.id}"}}]'>
                                     ${ph.phase_number}
                                     <div class="tooltip">
                                         <strong>Fase ${ph.phase_number}:</strong> ${escapeHTML(ph.title)}
@@ -118,8 +118,8 @@ import { navigate } from '../router.js';
                             <h2 style="font-family:'Montserrat'; font-weight:500; font-size:1.4rem; margin-top:0.25rem">Projeto: ${escapeHTML(p.project_name || p.client_name)}</h2>
                         </div>
                         <div style="display:flex; gap:0.5rem">
-                            <button class="btn" onclick="exportCSV('risks')" style="font-size:0.7rem; padding:0.4rem 0.8rem">Exportar Riscos</button>
-                            <button class="btn" onclick="navigate('project-detail', {currentProject: {id:'${p.id}'}})" style="background:var(--accent); color:#000; font-size:0.7rem; padding:0.4rem 0.8rem">Gerenciar Fases</button>
+                            <button class="btn" data-action="exportCSV" data-args='["risks"]' style="font-size:0.7rem; padding:0.4rem 0.8rem">Exportar Riscos</button>
+                            <button class="btn" data-action="navigate" data-args='["project-detail",{"currentProject":{"id":"${p.id}"}}]' style="background:var(--accent); color:#000; font-size:0.7rem; padding:0.4rem 0.8rem">Gerenciar Fases</button>
                         </div>
                     </div>
                     
@@ -141,7 +141,7 @@ import { navigate } from '../router.js';
 
     async function renderPortfolio(c, h, a) {
         h.textContent = 'Monitor';
-        a.innerHTML = `<div class="dropdown-wrap"><button class="btn dropdown-trigger" onclick="this.nextElementSibling.classList.toggle('open')">Exportar</button><div class="dropdown-menu"><div class="dropdown-item" onclick="exportCSV('risks')">Riscos CSV</div><div class="dropdown-item" onclick="exportCSV('vendors')">Fornecedores CSV</div><div class="dropdown-item" onclick="exportCSV('training')">Treinamento CSV</div></div></div>`;
+        a.innerHTML = `<div class="dropdown-wrap"><button class="btn dropdown-trigger" data-action="__monToggleDropdown" data-arg-el>Exportar</button><div class="dropdown-menu"><div class="dropdown-item" data-action="exportCSV" data-args='["risks"]'>Riscos CSV</div><div class="dropdown-item" data-action="exportCSV" data-args='["vendors"]'>Fornecedores CSV</div><div class="dropdown-item" data-action="exportCSV" data-args='["training"]'>Treinamento CSV</div></div></div>`;
         let portfolio = [];
         try { portfolio = await api('GET', '/api/v1/portfolio'); } catch(e) {}
         if (!Array.isArray(portfolio)) portfolio = [];
@@ -149,7 +149,7 @@ import { navigate } from '../router.js';
             const pct = p.overall_progress_pct || 0;
             const semaphore = pct > 70 ? {color:'var(--success)',label:'No prazo'} : pct > 30 ? {color:'var(--warning)',label:'Atencao'} : {color:'var(--danger)',label:'Critico'};
             return `
-            <div class="list-item" style="cursor:pointer" onclick="navigate('project-detail', {currentProject: {id:'${p.id}'}})">
+            <div class="list-item" style="cursor:pointer" data-action="navigate" data-args='["project-detail",{"currentProject":{"id":"${p.id}"}}]'>
                 <div style="display:flex;align-items:center;gap:0.75rem;flex:1">
                     <div style="width:10px;height:10px;border-radius:50%;background:${semaphore.color};flex-shrink:0" title="${semaphore.label}"></div>
                     <div>
@@ -199,7 +199,7 @@ import { navigate } from '../router.js';
             const pct = data.coverage_pct || 0;
             const barColor = pct > 80 ? 'var(--accent)' : pct > 50 ? '#feca57' : 'var(--danger)';
             openModal(`
-                <div class="modal-header"><span class="modal-title">Gap Analysis</span><button class="btn-ghost" onclick="forceCloseModal()">\u00d7</button></div>
+                <div class="modal-header"><span class="modal-title">Gap Analysis</span><button class="btn-ghost" data-action="forceCloseModal">\u00d7</button></div>
                 <div style="display:flex;gap:2rem;margin-bottom:1.5rem">
                     <div><div class="card-label">Cobertura</div><div style="font-size:2rem;font-weight:600;color:${barColor}">${pct.toFixed(0)}%</div></div>
                     <div><div class="card-label">Implementados</div><div style="font-size:1.2rem">${data.by_status?.Implemented || 0}</div></div>
@@ -214,11 +214,11 @@ import { navigate } from '../router.js';
     async function renderCertification(c, h, a) {
         h.textContent = 'Acompanhamento de Certificação';
         const proj = S.activeProject || S.projects[0];
-        if (!proj) { c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; return; }
+        if (!proj) { c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; return; }
         let cert = null;
         try { cert = await api('GET', `/api/v1/projects/${proj.id}/certification`); } catch(e) {}
         if (!cert || !cert.id) {
-            a.innerHTML = `<button class="btn btn-primary" onclick="initCertification('${proj.id}')">Iniciar Tracker</button>`;
+            a.innerHTML = `<button class="btn btn-primary" data-action="initCertification" data-args='["${proj.id}"]'>Iniciar Tracker</button>`;
             c.innerHTML = '<div class="empty-state fade-in"><h3>Nenhum tracker de certificação</h3><p>Clique em Iniciar Tracker para começar a acompanhar o processo de certificação.</p></div>';
             return;
         }
@@ -239,31 +239,31 @@ import { navigate } from '../router.js';
             <div class="card" style="padding:2.5rem;margin-bottom:1.5rem">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2rem">
                     <div>
-                        <div style="font-size:0.55rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.2em;margin-bottom:0.5rem">Estágio Atual</div>
+                        <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.2em;margin-bottom:0.5rem">Estágio Atual</div>
                         <div style="font-size:1.8rem;font-weight:500;font-family:'Montserrat',sans-serif;color:var(--text)">${STAGE_MAP_PT[cert.stage] || cert.stage}</div>
                     </div>
                     <div style="text-align:right">
                         <div style="font-size:2.5rem;font-weight:300;color:var(--accent);letter-spacing:-0.05em">${pct}%</div>
-                        <div style="font-size:0.6rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em">Completude</div>
+                        <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.1em">Completude</div>
                     </div>
                 </div>
                 <div style="height:4px;background:rgba(255,255,255,0.05);border-radius:2px;margin-bottom:2rem;position:relative;overflow:hidden">
                     <div style="width:${pct}%;height:100%;background:linear-gradient(90deg, var(--accent), #00d2ff);border-radius:2px;transition:width(0.8s);box-shadow:0 0 15px var(--accent-dim)"></div>
                 </div>
                 <div style="display:flex;gap:0.35rem;flex-wrap:wrap">
-                    ${stages.map((s, i) => `<span style="font-size:0.55rem;padding:0.35rem 0.75rem;border-radius:8px;font-weight:600;letter-spacing:0.05em;background:${i <= si ? 'var(--accent-dim)' : 'var(--surface)'};border:1px solid ${i <= si ? 'var(--accent)' : 'var(--border)'};color:${i <= si ? 'var(--accent)' : 'var(--muted)'}">${STAGE_MAP_PT[s] || s}</span>`).join('')}
+                    ${stages.map((s, i) => `<span style="font-size:0.72rem;padding:0.35rem 0.75rem;border-radius:8px;font-weight:600;letter-spacing:0.05em;background:${i <= si ? 'var(--accent-dim)' : 'var(--surface)'};border:1px solid ${i <= si ? 'var(--accent)' : 'var(--border)'};color:${i <= si ? 'var(--accent)' : 'var(--muted)'}">${STAGE_MAP_PT[s] || s}</span>`).join('')}
                 </div>
             </div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem">
                 <div class="card" style="padding:1.25rem">
                     <div class="card-label">Auditoria Estágio 1</div>
                     <div style="font-size:0.8rem;font-weight:500">${cert.stage1_date || 'A definir'}</div>
-                    <div style="font-size:0.6rem;margin-top:0.25rem;color:${cert.stage1_status==='Passed'?'var(--success)':'var(--muted)'}">${cert.stage1_status==='Passed'?'Aprovado':'Pendente'}</div>
+                    <div style="font-size:0.72rem;margin-top:0.25rem;color:${cert.stage1_status==='Passed'?'var(--success)':'var(--muted)'}">${cert.stage1_status==='Passed'?'Aprovado':'Pendente'}</div>
                 </div>
                 <div class="card" style="padding:1.25rem">
                     <div class="card-label">Auditoria Estágio 2</div>
                     <div style="font-size:0.8rem;font-weight:500">${cert.stage2_date || 'A definir'}</div>
-                    <div style="font-size:0.6rem;margin-top:0.25rem;color:${cert.stage2_status==='Passed'?'var(--success)':'var(--muted)'}">${cert.stage2_status==='Passed'?'Aprovado':'Pendente'}</div>
+                    <div style="font-size:0.72rem;margin-top:0.25rem;color:${cert.stage2_status==='Passed'?'var(--success)':'var(--muted)'}">${cert.stage2_status==='Passed'?'Aprovado':'Pendente'}</div>
                 </div>
                 <div class="card" style="padding:1.25rem">
                     <div class="card-label">Organismo Certificador</div>
@@ -277,7 +277,7 @@ import { navigate } from '../router.js';
             <div style="margin-top:2rem;display:flex;gap:0.75rem;align-items:center;background:rgba(255,255,255,0.02);padding:1.25rem;border-radius:12px;border:1px solid rgba(255,255,255,0.04)">
                 <div style="font-size:0.7rem;color:var(--muted);white-space:nowrap">Mudar estágio para:</div>
                 <select class="form-select" id="cert-stage" style="max-width:260px;font-size:0.75rem">${stages.map(s => `<option value="${s}" ${s===cert.stage?'selected':''}>${STAGE_MAP_PT[s] || s}</option>`).join('')}</select>
-                <button class="btn btn-primary" onclick="updateCertStage('${cert.id}')">Atualizar</button>
+                <button class="btn btn-primary" data-action="updateCertStage" data-args='["${cert.id}"]'>Atualizar</button>
             </div>
         </div>`;
     }
@@ -296,8 +296,8 @@ import { navigate } from '../router.js';
     async function renderMetrics(c, h, a) {
         h.textContent = 'Métricas & KPIs do SGSI';
         const proj = S.activeProject || S.projects[0];
-        if (!proj) { c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; return; }
-        a.innerHTML = `<button class="btn btn-primary" onclick="openNewMetricModal('${proj.id}')">+ Nova Métrica</button>`;
+        if (!proj) { c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; return; }
+        a.innerHTML = `<button class="btn btn-primary" data-action="openNewMetricModal" data-args='["${proj.id}"]'>+ Nova Métrica</button>`;
         
         let metrics = [];
         try { metrics = await api('GET', `/api/v1/projects/${proj.id}/metrics`); } catch(e) {}
@@ -337,7 +337,7 @@ import { navigate } from '../router.js';
                         </thead>
                         <tbody>
                             ${metrics.map(m => `
-                                <tr style="cursor:pointer" onclick='openEditMetricModal("${m.id}", "${proj.id}", ${JSON.stringify(m).replace(/'/g, "\\x27")})'>
+                                <tr style="cursor:pointer" data-action="openEditMetricModal" data-args='${escapeHTML(JSON.stringify([m.id, proj.id, m]))}'>
                                     <td><strong>${escapeHTML(m.metric_name)}</strong></td>
                                     <td>${m.target_value !== null ? m.target_value : '—'}</td>
                                     <td>${m.current_value !== null ? m.current_value : '—'}</td>
@@ -356,7 +356,7 @@ import { navigate } from '../router.js';
 
     function openNewMetricModal(projectId) {
         openModal(`
-            <div class="modal-header"><span class="modal-title">Nova Métrica de Desempenho</span><button class="btn-ghost" onclick="forceCloseModal()">\u00d7</button></div>
+            <div class="modal-header"><span class="modal-title">Nova Métrica de Desempenho</span><button class="btn-ghost" data-action="forceCloseModal">\u00d7</button></div>
             <div class="form-group"><label class="form-label">Nome do Indicador</label><input class="form-input" id="met-name" placeholder="Ex: Taxa de Sucesso dos Backups (%), Patches Críticos (%)"></div>
             <div style="display:flex;gap:0.5rem">
                 <div class="form-group" style="flex:1"><label class="form-label">Meta (Alvo)</label><input type="number" step="any" class="form-input" id="met-target" placeholder="99.9"></div>
@@ -385,7 +385,7 @@ import { navigate } from '../router.js';
                     </select>
                 </div>
             </div>
-            <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="createMetric('${projectId}')">Registrar Indicador</button>
+            <button class="btn btn-primary" style="width:100%;margin-top:1rem" data-action="createMetric" data-args='["${projectId}"]'>Registrar Indicador</button>
         `);
         document.getElementById('met-date').value = new Date().toISOString().split('T')[0];
     }
@@ -410,7 +410,7 @@ import { navigate } from '../router.js';
     function openEditMetricModal(id, projectId, data) {
         const m = data || {};
         openModal(`
-            <div class="modal-header"><span class="modal-title">Editar Métrica</span><button class="btn-ghost" onclick="forceCloseModal()">\u00d7</button></div>
+            <div class="modal-header"><span class="modal-title">Editar Métrica</span><button class="btn-ghost" data-action="forceCloseModal">\u00d7</button></div>
             <div class="form-group"><label class="form-label">Nome do Indicador</label><input class="form-input" id="met-e-name" value="${escapeHTML(m.metric_name||'')}"></div>
             <div style="display:flex;gap:0.5rem">
                 <div class="form-group" style="flex:1"><label class="form-label">Meta</label><input type="number" step="any" class="form-input" id="met-e-target" value="${m.target_value !== null ? m.target_value : ''}"></div>
@@ -440,8 +440,8 @@ import { navigate } from '../router.js';
                 </div>
             </div>
             <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:1.5rem">
-                <button class="btn" style="color:var(--danger)" onclick="if(confirm('Deseja excluir esta métrica?')){api('DELETE','/api/v1/metrics/${id}').then(()=>{forceCloseModal();render()})}">Excluir</button>
-                <button class="btn btn-primary" onclick="updateMetric('${id}')">Salvar</button>
+                <button class="btn" style="color:var(--danger)" data-action="__monDeleteMetric" data-args='["${id}"]'>Excluir</button>
+                <button class="btn btn-primary" data-action="updateMetric" data-args='["${id}"]'>Salvar</button>
             </div>
         `);
     }
@@ -467,7 +467,7 @@ import { navigate } from '../router.js';
         a.innerHTML = '';
         const p = S.currentProject || S.activeProject;
         if (!p) {
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para visualizar a governança.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>';
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para visualizar a governança.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>';
             return;
         }
         c.innerHTML = '<div class="loading"></div>';
@@ -487,19 +487,16 @@ import { navigate } from '../router.js';
     }
 
     window.renderProjectGovernance = function(members, projectId) {
+        // Organograma (D6): o DPO/Líder do SGSI é a ÂNCORA no topo; abaixo, um
+        // tronco desce para as ramificações por área. A âncora não se repete nas
+        // colunas. Ordem das áreas de cima p/ baixo na hierarquia de segurança.
         const categories = {
-            consultor: { label: 'Consultoria / Apoio', list: [] },
             executivo: { label: 'Liderança Executiva', list: [] },
             tech: { label: 'Tecnologia & Produto', list: [] },
-            operacoes: { label: 'Operações & Segurança', list: [] }
+            operacoes: { label: 'Operações & Segurança', list: [] },
+            consultor: { label: 'Consultoria / Apoio', list: [] }
         };
-        
-        members.forEach(m => {
-            if (categories[m.role_category]) {
-                categories[m.role_category].list.push(m);
-            }
-        });
-        
+
         const getInitials = name => {
             if (!name) return '??';
             const parts = name.trim().split(/\s+/);
@@ -507,56 +504,72 @@ import { navigate } from '../router.js';
             return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
         };
 
-        let colsHtml = '';
+        // A âncora é o primeiro membro marcado como is_primary (DPO/Líder).
+        const anchor = members.find(m => m.is_primary) || null;
+        members.forEach(m => {
+            if (anchor && m.id === anchor.id) return; // âncora não duplica nas colunas
+            if (categories[m.role_category]) categories[m.role_category].list.push(m);
+        });
+
         const canCrud = S.user && (S.user.role === 'platform_admin' || S.user.role === 'consultant' || S.user.role === 'consultor');
         const manageBtn = canCrud ? `
-            <button class="btn" style="padding:0.25rem 0.75rem; font-size:0.7rem; font-weight:600; height:28px" onclick="window.openGovernanceModal('${projectId}')">
+            <button class="btn" style="padding:0.25rem 0.75rem; font-size:0.7rem; font-weight:600; height:28px" data-action="openGovernanceModal" data-args='["${projectId}"]'>
                 Gerenciar Governança
             </button>
         ` : '';
 
+        const badge = `<span class="org-badge">DPO / Líder</span>`;
+        const memberCard = (m) => `
+            <div class="gov-member-item">
+                <div class="gov-avatar">${escapeHTML(getInitials(m.name))}</div>
+                <div class="gov-member-info">
+                    <div class="gov-member-name">
+                        <span>${escapeHTML(m.name)}</span>
+                        ${m.is_primary ? badge : ''}
+                    </div>
+                    <div class="gov-member-title">${escapeHTML(m.job_title)}</div>
+                    ${m.email ? `<div class="gov-member-email" title="${escapeHTML(m.email)}">${escapeHTML(m.email)}</div>` : ''}
+                </div>
+            </div>`;
+
+        const anchorHtml = anchor ? `
+            <div class="org-anchor">
+                <div class="gov-avatar org-anchor-avatar">${escapeHTML(getInitials(anchor.name))}</div>
+                <div class="org-anchor-info">
+                    <div class="org-anchor-name"><span>${escapeHTML(anchor.name)}</span>${badge}</div>
+                    <div class="org-anchor-title">${escapeHTML(anchor.job_title)}</div>
+                    ${anchor.email ? `<div class="gov-member-email org-anchor-email" title="${escapeHTML(anchor.email)}">${escapeHTML(anchor.email)}</div>` : ''}
+                </div>
+            </div>` : `
+            <div class="org-anchor org-anchor-empty">
+                <div class="org-anchor-name">DPO / Líder do SGSI não designado</div>
+                <div class="org-anchor-title">Defina o responsável máximo em “Gerenciar Governança”.</div>
+            </div>`;
+
+        let branchesHtml = '';
         for (const key in categories) {
             const cat = categories[key];
-            let membersHtml = cat.list.map(m => {
-                const primaryBadge = m.is_primary ? `<span style="font-weight:700; font-size:0.55rem; color:#00ade8; background:rgba(0,173,232,0.12); border:1px solid rgba(0,173,232,0.2); padding:1px 4px; border-radius:4px; margin-left:6px; text-transform:uppercase; font-family:'Montserrat',sans-serif; letter-spacing:0.5px">DPO / Líder</span>` : '';
-                const initials = getInitials(m.name);
-                return `
-                    <div class="gov-member-item">
-                        <div class="gov-avatar">${escapeHTML(initials)}</div>
-                        <div class="gov-member-info">
-                            <div class="gov-member-name">
-                                <span>${escapeHTML(m.name)}</span>
-                                ${primaryBadge}
-                            </div>
-                            <div class="gov-member-title">${escapeHTML(m.job_title)}</div>
-                            ${m.email ? `<div class="gov-member-email" title="${escapeHTML(m.email)}">${escapeHTML(m.email)}</div>` : ''}
-                        </div>
+            const membersHtml = cat.list.map(memberCard).join('') || `<div class="gov-empty-list">Nenhum cadastrado</div>`;
+            branchesHtml += `
+                <div class="org-branch">
+                    <div class="gov-section-card">
+                        <div class="gov-section-title">${cat.label}</div>
+                        <div style="display:flex; flex-direction:column; gap:8px">${membersHtml}</div>
                     </div>
-                `;
-            }).join('') || `<div class="gov-empty-list">Nenhum cadastrado</div>`;
-            
-            colsHtml += `
-                <div class="gov-section-card">
-                    <div style="font-size:0.65rem; color:var(--accent); font-weight:700; text-transform:uppercase; letter-spacing:0.08em; border-bottom:1px solid rgba(255,255,255,0.06); padding-bottom:6px; margin-bottom:8px">${cat.label}</div>
-                    <div style="display:flex; flex-direction:column; gap:8px">
-                        ${membersHtml}
-                    </div>
-                </div>
-            `;
+                </div>`;
         }
-        
+
         return `
-            <!-- Painel de Governança/Organograma do Projeto -->
-            <div style="margin-bottom:1.5rem; padding:20px; background:rgba(255,255,255,0.01); border:1px solid var(--border); border-radius:16px; backdrop-filter:blur(24px)">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
-                    <div style="font-family:'Montserrat',sans-serif; font-weight:500; font-size:0.85rem; color:var(--accent); text-transform:uppercase; letter-spacing:0.5px">Governança & Organograma do SGSI</div>
+            <!-- Organograma de Governança do SGSI (D6) -->
+            <div class="org-chart">
+                <div class="org-header">
+                    <div class="org-header-title">Governança & Organograma do SGSI</div>
                     ${manageBtn}
                 </div>
-                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px;">
-                    ${colsHtml}
-                </div>
-            </div>
-        `;
+                ${anchorHtml}
+                <div class="org-trunk" aria-hidden="true"></div>
+                <div class="org-branches">${branchesHtml}</div>
+            </div>`;
     };
 
     window.renderGovernanceSelectOptions = function(members, selectedValue) {
@@ -592,7 +605,7 @@ import { navigate } from '../router.js';
         openModal(`
             <div class="modal-header">
                 <span class="modal-title">Gerenciar Membros da Governança</span>
-                <button class="btn-ghost" onclick="forceCloseModal()">Fechar</button>
+                <button class="btn-ghost" data-action="forceCloseModal">Fechar</button>
             </div>
             <div id="gov-modal-body">
                 <div class="loading"></div>
@@ -615,13 +628,13 @@ import { navigate } from '../router.js';
                 <div>
                     <strong style="color:var(--text)">${escapeHTML(m.name)}</strong>
                     <span style="font-size:0.7rem; color:var(--accent)">- ${escapeHTML(m.job_title)} (${escapeHTML(m.role_category)})</span>
-                    ${m.email ? `<div style="font-size:0.65rem; color:var(--text-dim)">${escapeHTML(m.email)}</div>` : ''}
+                    ${m.email ? `<div style="font-size:0.75rem; color:var(--text-dim)">${escapeHTML(m.email)}</div>` : ''}
                 </div>
                 <div style="display:flex; gap:8px">
-                    <button class="btn btn-ghost" style="padding:0.25rem 0.5rem; font-size:0.65rem; color:var(--accent); border-color:rgba(0,173,232,0.2)" onclick="window.editGovernanceMember('${m.id}')">
+                    <button class="btn btn-ghost" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:var(--accent); border-color:rgba(0,173,232,0.2)" data-action="editGovernanceMember" data-args='["${m.id}"]'>
                         Editar
                     </button>
-                    <button class="btn btn-ghost" style="padding:0.25rem 0.5rem; font-size:0.65rem; color:#ef4444; border-color:rgba(239,68,68,0.2)" onclick="window.deleteGovernanceMember('${projectId}', '${m.id}')">
+                    <button class="btn btn-ghost" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:#ef4444; border-color:rgba(239,68,68,0.2)" data-action="deleteGovernanceMember" data-args='["${projectId}","${m.id}"]'>
                         Excluir
                     </button>
                 </div>
@@ -631,7 +644,7 @@ import { navigate } from '../router.js';
         const formHtml = `
             <div style="border-top:1px solid var(--border); padding-top:16px; margin-top:16px">
                 <h4 style="font-family:'Montserrat',sans-serif; font-size:0.85rem; color:var(--accent); margin-bottom:12px; text-transform:uppercase; letter-spacing:0.5px" id="gov-form-title">Adicionar Novo Membro</h4>
-                <form id="add-gov-member-form" onsubmit="window.saveGovernanceMember(event, '${projectId}')" style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
+                <form id="add-gov-member-form" data-action-submit="saveGovernanceMember" data-arg-event data-args='["${projectId}"]' style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
                     <div class="form-group" style="grid-column: span 2">
                         <label class="form-label">Nome Completo</label>
                         <input class="form-input" id="gov-name" required placeholder="Ex: Ricardo Esper">
@@ -658,7 +671,7 @@ import { navigate } from '../router.js';
                         <label for="gov-primary" class="form-label" style="margin-bottom:0; cursor:pointer">Contato Principal / DPO Líder</label>
                     </div>
                     <div style="grid-column: span 2; display:flex; justify-content:flex-end; gap:8px; margin-top:8px">
-                        <button class="btn btn-secondary" type="button" id="btn-cancel-gov-edit" style="display:none" onclick="window.cancelGovernanceEdit()">Cancelar</button>
+                        <button class="btn btn-secondary" type="button" id="btn-cancel-gov-edit" style="display:none" data-action="cancelGovernanceEdit">Cancelar</button>
                         <button class="btn btn-primary" type="submit" id="btn-submit-gov">Adicionar Membro</button>
                     </div>
                 </form>
@@ -787,11 +800,11 @@ import { navigate } from '../router.js';
         const proj = S.activeProject || S.projects[0];
         if (!proj) { 
             a.innerHTML = '';
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
             return; 
         }
         
-        a.innerHTML = `<button onclick="window.saveContext()" class="btn btn-primary">Salvar Alterações</button>`;
+        a.innerHTML = `<button data-action="saveContext" class="btn btn-primary">Salvar Alterações</button>`;
         c.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--muted)">Carregando análise de contexto...</div>';
         
         try {
@@ -840,8 +853,8 @@ import { navigate } from '../router.js';
 
             const tabsHeader = `
                 <div style="display:flex; gap:12px; margin-bottom:20px; border-bottom:1px solid var(--border); padding-bottom:12px" class="fade-in">
-                    <button onclick="window.switchContextTab('swot')" class="btn ${activeTab !== 'charter' ? 'btn-primary' : 'btn-ghost'}" style="font-size:0.85rem">Matriz SWOT & Requisitos (Cl. 4.1 / 4.2)</button>
-                    <button onclick="window.switchContextTab('charter')" class="btn ${activeTab === 'charter' ? 'btn-primary' : 'btn-ghost'}" style="font-size:0.85rem">Charter de Escopo & Fronteiras do SGSI (Cl. 4.3)</button>
+                    <button data-action="switchContextTab" data-args='["swot"]' class="btn ${activeTab !== 'charter' ? 'btn-primary' : 'btn-ghost'}" style="font-size:0.85rem">Matriz SWOT & Requisitos (Cl. 4.1 / 4.2)</button>
+                    <button data-action="switchContextTab" data-args='["charter"]' class="btn ${activeTab === 'charter' ? 'btn-primary' : 'btn-ghost'}" style="font-size:0.85rem">Charter de Escopo & Fronteiras do SGSI (Cl. 4.3)</button>
                 </div>
             `;
 
@@ -1034,11 +1047,11 @@ import { navigate } from '../router.js';
         const proj = S.activeProject || S.projects[0];
         if (!proj) { 
             a.innerHTML = '';
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
             return; 
         }
         
-        a.innerHTML = `<button onclick="window.openStakeholderModal()" class="btn btn-primary">+ Novo Stakeholder</button>`;
+        a.innerHTML = `<button data-action="openStakeholderModal" class="btn btn-primary">+ Novo Stakeholder</button>`;
         
         let list = [];
         try {
@@ -1086,8 +1099,8 @@ import { navigate } from '../router.js';
                     window.renderStatusBadge(influenceText, influenceType),
                     `<div style="font-size:0.8rem; line-height:1.45">${escapeHTML(s.communication_method || '')}</div>`,
                     `<div style="display:flex; gap:6px; justify-content:center">
-                        <button onclick="window.openStakeholderModal('${s.id}')" class="btn btn-ghost btn-sm">Editar</button>
-                        <button onclick="window.deleteStakeholder('${s.id}')" class="btn btn-ghost btn-sm" style="color:#ff3b30">Excluir</button>
+                        <button data-action="openStakeholderModal" data-args='["${s.id}"]' class="btn btn-ghost btn-sm">Editar</button>
+                        <button data-action="deleteStakeholder" data-args='["${s.id}"]' class="btn btn-ghost btn-sm" style="color:#ff3b30">Excluir</button>
                     </div>`
                 ];
             }),
@@ -1108,9 +1121,9 @@ import { navigate } from '../router.js';
                 <span class="modal-title" style="font-family:'Montserrat',sans-serif;font-weight:700;color:var(--accent)">
                     ${isEdit ? 'Editar Parte Interessada' : 'Nova Parte Interessada'}
                 </span>
-                <button class="btn-ghost" onclick="closeModal()">&times;</button>
+                <button class="btn-ghost" data-action="closeModal">&times;</button>
             </div>
-            <form id="stakeholder-form" onsubmit="window.saveStakeholder(event, ${isEdit ? '\'' + s.id + '\'' : 'null'})" style="margin-top:1rem">
+            <form id="stakeholder-form" data-action-submit="saveStakeholder" data-arg-event data-args='${escapeHTML(JSON.stringify([isEdit ? s.id : null]))}' style="margin-top:1rem">
                 <div class="form-group" style="margin-bottom:16px">
                     <label class="form-label">Nome / Identificação</label>
                     <input type="text" name="name" class="form-input" value="${s ? escapeHTML(s.name) : ''}" required style="width:100%" />
@@ -1155,7 +1168,7 @@ import { navigate } from '../router.js';
                     <textarea name="requirements" class="form-input" style="width:100%;height:80px;font-family:inherit">${s ? escapeHTML(s.requirements || '') : ''}</textarea>
                 </div>
                 <div style="display:flex; justify-content:flex-end; gap:8px">
-                    <button type="button" onclick="closeModal()" class="btn">Cancelar</button>
+                    <button type="button" data-action="closeModal" class="btn">Cancelar</button>
                     <button type="submit" class="btn btn-primary">${isEdit ? 'Salvar Alterações' : 'Criar'}</button>
                 </div>
             </form>
@@ -1214,7 +1227,7 @@ import { navigate } from '../router.js';
                     return `
                         <span style="display: inline-flex; align-items: center; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; font-size: 0.75rem; color: var(--text); line-height: 1;">
                             <span style="font-weight: 400; margin-right: 4px;">${escapeHTML(name)}</span>
-                            ${role ? `<span style="color: var(--accent); font-size: 0.65rem; font-weight: 500;">(${escapeHTML(role)})</span>` : ''}
+                            ${role ? `<span style="color: var(--accent); font-size:0.75rem; font-weight: 500;">(${escapeHTML(role)})</span>` : ''}
                         </span>
                     `;
                 }
@@ -1228,12 +1241,12 @@ import { navigate } from '../router.js';
         const proj = S.activeProject || S.projects[0];
         if (!proj) { 
             a.innerHTML = '';
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
             return; 
         }
         
         const isOrgUser = S.user && S.user.role === 'org_user';
-        a.innerHTML = isOrgUser ? '' : `<button onclick="window.openNewMgmtReviewModal()" class="btn btn-primary">+ Nova Análise Crítica</button>`;
+        a.innerHTML = isOrgUser ? '' : `<button data-action="openNewMgmtReviewModal" class="btn btn-primary">+ Nova Análise Crítica</button>`;
         
         let list = [];
         try {
@@ -1261,7 +1274,7 @@ import { navigate } from '../router.js';
                     `<span style="font-weight:600;color:var(--accent);font-family:monospace;font-size:0.85rem">${escapeHTML(m.review_date)}</span>`,
                     formatAttendees(m.attendees),
                     window.renderStatusBadge(isCompleted ? 'Concluída' : 'Planejada', isCompleted ? 'success' : 'warning'),
-                    `<button onclick="window.openEditMgmtReviewModal('${m.id}')" class="btn btn-ghost btn-sm">Abrir Pauta / Editar</button>`
+                    `<button data-action="openEditMgmtReviewModal" data-args='["${m.id}"]' class="btn btn-ghost btn-sm">Abrir Pauta / Editar</button>`
                 ];
             }),
             { emptyState: 'Nenhuma reunião de análise crítica cadastrada ainda.' }
@@ -1278,7 +1291,7 @@ import { navigate } from '../router.js';
             <div style="font-family:'Montserrat',sans-serif;font-weight:700;font-size:1.25rem;margin-bottom:1.5rem;color:var(--accent)">
                 Nova Reunião de Análise Crítica (Cláusula 9.3)
             </div>
-            <form id="new-mgmt-form" onsubmit="window.saveNewMgmtReview(event)">
+            <form id="new-mgmt-form" data-action-submit="saveNewMgmtReview" data-arg-event>
                 <div class="form-group" style="margin-bottom:12px">
                     <label style="display:block;margin-bottom:4px;font-size:0.85rem">Data da Análise</label>
                     <input type="date" name="review_date" required style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:8px 12px;color:var(--text)" />
@@ -1288,7 +1301,7 @@ import { navigate } from '../router.js';
                     <textarea name="attendees" required style="width:100%;height:80px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:8px 12px;color:var(--text);font-family:inherit" placeholder="Ex: CEO, CISO, DPO, Diretor Jurídico..."></textarea>
                 </div>
                 <div style="text-align:right">
-                    <button type="button" onclick="closeModal()" class="btn-secondary" style="margin-right:8px">Cancelar</button>
+                    <button type="button" data-action="closeModal" class="btn-secondary" style="margin-right:8px">Cancelar</button>
                     <button type="submit" class="btn-primary">Criar Reunião</button>
                 </div>
             </form>
@@ -1388,8 +1401,8 @@ import { navigate } from '../router.js';
             </div>
 
             <div style="text-align:right">
-                <button onclick="closeModal()" class="btn-secondary" style="margin-right:8px">Fechar</button>
-                ${!isOrgUser ? `<button onclick="window.openEditMgmtReviewForm('${review.id}')" class="btn-primary">Editar Ata</button>` : ''}
+                <button data-action="closeModal" class="btn-secondary" style="margin-right:8px">Fechar</button>
+                ${!isOrgUser ? `<button data-action="openEditMgmtReviewForm" data-args='["${review.id}"]' class="btn-primary">Editar Ata</button>` : ''}
             </div>
         `;
         openModal(html);
@@ -1402,7 +1415,7 @@ import { navigate } from '../router.js';
             <div style="font-family:'Montserrat',sans-serif;font-weight:700;font-size:1.25rem;margin-bottom:1.5rem;color:var(--accent)">
                 Editar Ata da Análise Crítica (${review.review_date})
             </div>
-            <form id="edit-mgmt-form" onsubmit="window.saveMgmtReviewDetails(event, '${review.id}')">
+            <form id="edit-mgmt-form" data-action-submit="saveMgmtReviewDetails" data-arg-event data-args='["${review.id}"]'>
                 <div class="form-group" style="margin-bottom:16px">
                     <label style="display:block;margin-bottom:4px;font-size:0.85rem;font-weight:600">Participantes</label>
                     <textarea name="attendees" required style="width:100%;height:60px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:8px 12px;color:var(--text);font-family:inherit;font-size:0.85rem">${escapeHTML(review.attendees || '')}</textarea>
@@ -1424,7 +1437,7 @@ import { navigate } from '../router.js';
                     </select>
                 </div>
                 <div style="text-align:right">
-                    <button type="button" onclick="window.openEditMgmtReviewModal('${review.id}')" class="btn-secondary" style="margin-right:8px">Voltar</button>
+                    <button type="button" data-action="openEditMgmtReviewModal" data-args='["${review.id}"]' class="btn-secondary" style="margin-right:8px">Voltar</button>
                     <button type="submit" class="btn-primary">Salvar Alterações</button>
                 </div>
             </form>
@@ -1461,7 +1474,7 @@ import { navigate } from '../router.js';
                 Carregando notas...
             </div>
             <div style="text-align:right">
-                <button type="button" onclick="closeModal()" class="btn-secondary">Fechar</button>
+                <button type="button" data-action="closeModal" class="btn-secondary">Fechar</button>
             </div>
         `);
         
@@ -1495,7 +1508,7 @@ import { navigate } from '../router.js';
                         ` : `
                             <div style="margin-top:8px;display:flex;gap:8px">
                                 <input type="text" id="respond-input-${n.id}" placeholder="Escreva a resposta para o auditor..." style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:6px 10px;color:var(--text);font-size:0.85rem" />
-                                <button onclick="window.submitAuditorResponse('${n.id}', '${projectId}')" class="btn-primary" style="padding:6px 12px;font-size:0.85rem;border-radius:8px;border:none;background:var(--accent);color:#070b14;font-weight:700">Responder</button>
+                                <button data-action="submitAuditorResponse" data-args='["${n.id}","${projectId}"]' class="btn-primary" style="padding:6px 12px;font-size:0.85rem;border-radius:8px;border:none;background:var(--accent);color:#070b14;font-weight:700">Responder</button>
                             </div>
                         `}
                     </div>
@@ -1527,12 +1540,12 @@ import { navigate } from '../router.js';
         const proj = S.activeProject || S.projects[0];
         if (!proj) { 
             a.innerHTML = '';
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
             return; 
         }
         
         const canCrud = S.user && (S.user.role === 'platform_admin' || S.user.role === 'consultant' || S.user.role === 'consultor');
-        a.innerHTML = `<button class="btn" onclick="exportCSV('assets')" style="margin-right:8px">Exportar CSV</button>` + (canCrud ? `<button class="btn btn-primary" onclick="window.openNewAssetModal('${proj.id}')">+ Novo Ativo</button>` : '');
+        a.innerHTML = `<button class="btn" data-action="exportCSV" data-args='["assets"]' style="margin-right:8px">Exportar CSV</button>` + (canCrud ? `<button class="btn btn-primary" data-action="openNewAssetModal" data-args='["${proj.id}"]'>+ Novo Ativo</button>` : '');
         
         let assets = [];
         try { 
@@ -1566,7 +1579,7 @@ import { navigate } from '../router.js';
                     escapeHTML(ast.owner || 'N/A'),
                     window.renderStatusBadge(ast.classification || 'Internal', classType),
                     window.renderStatusBadge(ast.status || 'Active', statusType),
-                    `<button class="btn btn-ghost btn-sm" onclick="window.openAssetDetailsModal('${ast.id}')">Detalhes</button>`
+                    `<button class="btn btn-ghost btn-sm" data-action="openAssetDetailsModal" data-args='["${ast.id}"]'>Detalhes</button>`
                 ];
             }),
             { emptyState: 'Nenhum ativo de informação registrado neste projeto.' }
@@ -1587,7 +1600,7 @@ import { navigate } from '../router.js';
         openModal(`
             <div class="modal-header">
                 <span class="modal-title">Detalhes do Ativo de Informação</span>
-                <button class="btn-ghost" onclick="forceCloseModal()">&times;</button>
+                <button class="btn-ghost" data-action="forceCloseModal">&times;</button>
             </div>
             <div style="display:flex; flex-direction:column; gap:16px; font-family:'Inter',sans-serif;">
                 <div style="font-family:'Montserrat',sans-serif; font-weight:700; font-size:1.4rem; color:var(--accent)">
@@ -1618,15 +1631,15 @@ import { navigate } from '../router.js';
                 </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px">
-                <button class="btn" onclick="forceCloseModal()">Fechar</button>
-                ${canCrud ? `<button class="btn btn-primary" onclick="window.openEditAssetModal('${id}')">Editar Ativo</button>` : ''}
+                <button class="btn" data-action="forceCloseModal">Fechar</button>
+                ${canCrud ? `<button class="btn btn-primary" data-action="openEditAssetModal" data-args='["${id}"]'>Editar Ativo</button>` : ''}
             </div>
         `);
     };
 
     window.openNewAssetModal = function(projectId) {
         openModal(`
-            <div class="modal-header"><span class="modal-title">Novo Ativo</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Novo Ativo</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Nome do Ativo</label><input class="form-input" id="ast-name" placeholder="Ex: Banco de dados RDS Prod, Código-Fonte GitHub"></div>
             <div class="form-group">
                 <label class="form-label">Categoria</label>
@@ -1650,7 +1663,7 @@ import { navigate } from '../router.js';
                 <div class="form-group" style="flex:1"><label class="form-label">Dono (Owner)</label><input class="form-input" id="ast-owner" placeholder="Ex: IT Manager"></div>
                 <div class="form-group" style="flex:1"><label class="form-label">Localizacao</label><input class="form-input" id="ast-location" placeholder="Ex: AWS us-east-1"></div>
             </div>
-            <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="window.createAsset('${projectId}')">Registrar Ativo</button>
+            <button class="btn btn-primary" style="width:100%;margin-top:1rem" data-action="createAsset" data-args='["${projectId}"]'>Registrar Ativo</button>
         `);
     };
 
@@ -1664,7 +1677,7 @@ import { navigate } from '../router.js';
     window.openEditAssetModal = function(id) {
         const ast = S.assets.find(x => x.id === id) || {};
         openModal(`
-            <div class="modal-header"><span class="modal-title">Editar Ativo</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Editar Ativo</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Nome do Ativo</label><input class="form-input" id="ast-e-name" value="${escapeHTML(ast.name||'')}"></div>
             <div class="form-group">
                 <label class="form-label">Categoria</label>
@@ -1696,8 +1709,8 @@ import { navigate } from '../router.js';
                 </select>
             </div>
             <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:1.5rem">
-                <button class="btn" style="color:var(--danger)" onclick="window.deleteAsset('${id}')">Excluir</button>
-                <button class="btn btn-primary" onclick="window.updateAsset('${id}')">Salvar</button>
+                <button class="btn" style="color:var(--danger)" data-action="deleteAsset" data-args='["${id}"]'>Excluir</button>
+                <button class="btn btn-primary" data-action="updateAsset" data-args='["${id}"]'>Salvar</button>
             </div>
         `);
     };
@@ -1711,6 +1724,13 @@ import { navigate } from '../router.js';
     window.deleteAsset = async function(id) {
         if (confirm('Deseja excluir este ativo?')) { await api('DELETE', `/api/v1/assets/${id}`); forceCloseModal(); render(); }
     };
+
+// Wrappers S2 (delegação): expressões que antes viviam no onclick inline.
+window.__monToggleDropdown = (el) => { const menu = el && el.nextElementSibling; if (menu) menu.classList.toggle('open'); };
+window.__monDeleteMetric = (id) => {
+    if (!confirm('Deseja excluir esta métrica?')) return;
+    api('DELETE', `/api/v1/metrics/${id}`).then(() => { forceCloseModal(); render(); });
+};
 
 window.renderMonitor = renderMonitor;
 window.renderPortfolio = renderPortfolio;

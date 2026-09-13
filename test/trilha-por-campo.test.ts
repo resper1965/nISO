@@ -6,7 +6,7 @@ import {
   apenasMudancas,
   colapsaDesfeitas,
   valorParaTrilha,
-} from '../src/trilha';
+} from '../src/trilha-campo';
 
 describe('regra: null de CMMI vira —, nunca a palavra "null"', () => {
   it('vazio, null e undefined viram o travessão', () => {

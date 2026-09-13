@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
-import { genId, genToken, genNumericCode, rateLimit, hashPassword, verifyPassword, logAudit, sendEmail, escapeHtml, invalidateUserSessions, SESSION_TTL_SEC, erro500 } from '../helpers';
+import { genId, genToken, genNumericCode, rateLimit, rateLimitD1, hashPassword, verifyPassword, logAudit, sendEmail, escapeHtml, invalidateUserSessions, SESSION_TTL_SEC, erro500 } from '../helpers';
 
 /** IP do cliente para rate limiting (Cloudflare popula CF-Connecting-IP) */
 function clientIp(c: any): string {
   return c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
 }
-import { validateBody, loginSchema, setupSchema, resetRequestSchema, resetConfirmSchema } from '../schemas';
+import { authMiddleware } from '../middleware/auth';
+import { validateBody, loginSchema, setupSchema, resetRequestSchema, resetConfirmSchema, primeiroAcessoSchema, mudarSenhaSchema } from '../schemas';
 import {
   decisaoLogin, mensagemCredencialInvalida, mensagemBloqueio,
   BLOQUEIO_SEG, JANELA_FALHAS_SEG,
@@ -53,6 +54,32 @@ async function desafioResolvido(c: any, token: string | undefined, ip: string): 
   }
 }
 
+
+/*
+ * ACHADO: três rotas deste arquivo estavam MORTAS por ordem de montagem.
+ *
+ * O `index.ts` monta `app.route('/api/v1/auth', authApp)` ANTES de
+ * `app.use('/api/v1/*', authMiddleware)`. Em Hono o sub-router é HANDLER, não
+ * middleware: quando ele responde, a cadeia para — e o `authMiddleware`
+ * registrado depois nunca roda para nada sob `/api/v1/auth`. Isso é correto
+ * para `/login`, `/setup`, `/forgot-password` e `/reset-password`, que precisam
+ * ser públicos. Para as três abaixo era defeito, e dava para ver em produção:
+ *
+ *   GET  /api/v1/auth/me                  → 200 {} sem credencial nenhuma
+ *   POST /api/v1/auth/reset-password-first→ 403 SEMPRE (`c.get('user')` vazio)
+ *   POST /api/v1/auth/change-password     → 500 SEMPRE (`user.email` de undefined)
+ *
+ * A troca de senha do primeiro acesso é o caminho que o `globals.js` usa depois
+ * do login com `requires_password_change` — ou seja, o fluxo obrigatório de
+ * primeiro acesso não funcionava.
+ *
+ * As três passam a exigir sessão explicitamente. `/logout` NÃO entra: ele lê o
+ * token do cabeçalho e apaga a chave, e exigir sessão válida para deslogar
+ * inverteria o objetivo — sessão já expirada deve poder ser limpa.
+ */
+authApp.use('/me', authMiddleware);
+authApp.use('/change-password', authMiddleware);
+authApp.use('/reset-password-first', authMiddleware);
 
 authApp.post('/setup', async (c) => {
   try {
@@ -115,8 +142,20 @@ authApp.post('/login', async (c) => {
       }, 401);
     }
 
+    // S6: além do teto por IP acima, um teto por CONTA-ALVO. O limite por IP não
+    // freia um ataque distribuído (muitos IPs) contra uma única conta; este fecha
+    // isso. Usa o contador ATÔMICO de janela fixa no D1 (rateLimitD1): sendo um
+    // controle de segurança, não pode vazar sob concorrência (o get-then-put do KV
+    // não é atômico) nem ter a janela deslizante do TTL — os dois pontos do Codex
+    // no #113. Chave por email normalizado; keyspace limitado (uma linha por
+    // conta), sem TTL.
+    const contaKey = email.trim().toLowerCase();
+    if (!(await rateLimitD1(c.env.DB, `login:acct:${contaKey}`, 10, 300))) {
+      return c.json({ error: 'Muitas tentativas para esta conta. Tente novamente em alguns minutos.' }, 429);
+    }
+
     const user = await c.env.DB.prepare(
-      'SELECT id, email, name, role, client_project_id, password_hash, requires_password_change, totp_enabled FROM users WHERE email = ?'
+      'SELECT id, email, name, role, client_project_id, password_hash, requires_password_change, totp_enabled, ativo FROM users WHERE email = ?'
     ).bind(email).first() as any;
 
     if (!user || !(await verifyPassword(password, user.password_hash))) {
@@ -143,6 +182,14 @@ authApp.post('/login', async (c) => {
       }, 401);
     }
 
+    // Conta desativada (por SCIM, item 4.2) não autentica. A MESMA resposta de
+    // credencial errada, de propósito: distinguir "senha errada" de "conta
+    // desativada" diria a quem sonda que aquele e-mail existe aqui — e a pessoa
+    // legítima descobre pelo IdP, que é onde o desligamento aconteceu.
+    if (user.ativo === 0) {
+      return c.json({ error: 'Invalid credentials' }, 401);
+    }
+
     // Credencial correta zera a contagem: a janela existe para tentativa
     // seguida de erro, não para punir quem errou uma vez ontem.
     await c.env.SESSIONS.delete(chaves.falhas);
@@ -158,6 +205,7 @@ authApp.post('/login', async (c) => {
     delete user.password_hash;
     delete user.requires_password_change;
     delete user.totp_enabled;
+    delete user.ativo;
     
     if (user.role === 'admin') {
       user.role = 'platform_admin';
@@ -191,8 +239,9 @@ authApp.post('/reset-password-first', async (c) => {
     const user = c.get('user');
     if (!user) return c.json({ error: 'Não autorizado' }, 403);
 
-    const { newPassword } = await c.req.json<{ newPassword: string }>();
-    if (!newPassword) return c.json({ error: 'Nova senha é obrigatória' }, 400);
+    const v = await validateBody(c, primeiroAcessoSchema);
+    if (!v.success) return v.response;
+    const { newPassword } = v.data;
 
     const newHash = await hashPassword(newPassword);
     
@@ -215,8 +264,9 @@ authApp.post('/forgot-password', async (c) => {
       return c.json({ error: 'Muitas solicitações. Tente novamente mais tarde.' }, 429);
     }
 
-    const { email } = await c.req.json<{ email: string }>();
-    if (!email) return c.json({ error: 'Email é obrigatório' }, 400);
+    const v = await validateBody(c, resetRequestSchema);
+    if (!v.success) return v.response;
+    const { email } = v.data;
 
     const user = await c.env.DB.prepare(
       'SELECT id, email, name FROM users WHERE email = ?'
@@ -268,8 +318,9 @@ authApp.post('/reset-password', async (c) => {
       return c.json({ error: 'Muitas tentativas. Tente novamente mais tarde.' }, 429);
     }
 
-    const { token, newPassword } = await c.req.json<{ token: string; newPassword: string }>();
-    if (!token || !newPassword) return c.json({ error: 'Token e nova senha são obrigatórios' }, 400);
+    const v = await validateBody(c, resetConfirmSchema);
+    if (!v.success) return v.response;
+    const { token, newPassword } = v.data;
 
     const storedData = await c.env.SESSIONS.get(`reset_token:${token}`);
     if (!storedData) {
@@ -313,9 +364,10 @@ authApp.get('/me', (c) => {
 
 authApp.post('/change-password', async (c) => {
   try {
-    const { oldPassword, newPassword } = await c.req.json();
+    const v = await validateBody(c, mudarSenhaSchema);
+    if (!v.success) return v.response;
+    const { oldPassword, newPassword } = v.data;
     const user = c.get('user');
-    if (!oldPassword || !newPassword) return c.json({ error: 'Senhas obrigatórias' }, 400);
     
     const dbUser = await c.env.DB.prepare('SELECT password_hash FROM users WHERE email = ?')
       .bind(user.email).first() as any;

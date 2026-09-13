@@ -1,15 +1,297 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
-import { genId, genToken, logAudit, validateUpload, erro500 } from '../helpers';
+import { genId, genToken, logAudit, validateUpload, erro500, somenteNess, sha256Hex } from '../helpers';
 import { PHASE_TITLES, PHASE_CHECKLISTS } from '../constants';
 import { MigrationService } from '../services/migration-service';
 import { seedPhases } from '../services/project-setup';
+import { controlsForRole, ISO_27701_2025_STANDARD } from '../data/iso27701-2025';
 import { checkCoherence } from '../services/coherence';
-import { validateBody, projectPhaseSchema, interviewSchema, evidenceMetaSchema, scopeChangeSchema, auditorTokenSchema } from '../schemas';
+import { validateBody, projectPhaseSchema, interviewSchema, evidenceMetaSchema, scopeChangeSchema, auditorTokenSchema, politicaTenantSchema, ssoConfigSchema } from '../schemas';
 import { registerAssetRoutes } from './project-assets';
+import { encryptSecret, decryptSecret, isEncrypted } from '../secret-crypto';
+import { COLUNAS_REVOGACAO } from './controls';
+import { exportarProjeto } from '../portabilidade';
+import { ipPermitido } from '../politica-tenant';
+import { papelValidoParaSso } from '../sso';
 
 export const projectsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+
+/**
+ * Emite o token SCIM deste cliente (item 4.2 do plano).
+ *
+ * O token é mostrado UMA VEZ e guardado só como hash — quem tem acesso ao banco
+ * não deve conseguir se passar pelo IdP do cliente, que é justamente quem tem
+ * poder de desativar contas. Mesma disciplina de `api_keys.key_hash`.
+ *
+ * `POST` e não `PUT`: emitir substitui o token anterior, e chamar duas vezes
+ * gera dois tokens diferentes. Um `PUT` idempotente aqui esconderia isso.
+ */
+projectsApp.post('/:projectId/scim-token', somenteNess, async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const projeto = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(projectId).first();
+    if (!projeto) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    const token = `scim_${genToken()}${genToken()}`;
+    const ator = c.get('user')?.email ?? 'system';
+
+    await c.env.DB.prepare(
+      `INSERT INTO project_scim (project_id, token_hash, ativo, criado_em, criado_por)
+       VALUES (?, ?, 1, datetime('now'), ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         token_hash = excluded.token_hash, ativo = 1,
+         criado_em = excluded.criado_em, criado_por = excluded.criado_por, ultimo_uso_em = NULL`
+    ).bind(projectId, await sha256Hex(token), ator).run();
+
+    await logAudit(
+      c.env.DB, 'project.scim_token_issued', ator,
+      `Token SCIM emitido para o projeto ${projectId} (o anterior, se havia, deixou de valer)`,
+      '', '', projectId
+    );
+
+    return c.json({
+      ok: true,
+      token,
+      base_url: `${new URL(c.req.url).origin}/scim/v2`,
+      aviso: 'Guarde agora: o token não é mostrado de novo. Emitir outro invalida este.',
+    }, 201);
+  } catch (e: any) {
+    return erro500(c, 'Falha ao emitir o token SCIM', e);
+  }
+});
+
+/**
+ * Configuração de SSO deste cliente (item 4.1 do plano).
+ *
+ * Escrita restrita à ness., pelo mesmo motivo da política de segurança: quem
+ * controla o `issuer` controla quem entra. Um `org_admin` que pudesse apontar o
+ * SSO do próprio tenant para um IdP escolhido por ele passaria a poder emitir
+ * tokens para qualquer e-mail daquele domínio.
+ *
+ * O `client_secret` NUNCA volta na leitura — nem mascarado com os últimos
+ * dígitos. Segredo de IdP não tem por que ser lido de volta por ninguém: quem
+ * precisa dele é o Worker, que o decifra na hora do login.
+ */
+projectsApp.get('/:projectId/sso', somenteNess, async (c) => {
+  try {
+    const p = await c.env.DB.prepare(
+      'SELECT project_id, issuer, client_id, dominios, papel_padrao, ativo, atualizado_em, atualizado_por FROM project_sso WHERE project_id = ?'
+    ).bind(c.req.param('projectId')).first();
+    return c.json({ ok: true, sso: p ?? null });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao ler a configuração de SSO', e);
+  }
+});
+
+projectsApp.put('/:projectId/sso', somenteNess, async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const v = await validateBody(c, ssoConfigSchema);
+    if (!v.success) return v.response;
+    const body = v.data as any;
+
+    const projeto = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(projectId).first();
+    if (!projeto) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    // Papel de staff atribuído por provisionamento automático transformaria
+    // "quem tem e-mail do domínio" em "quem administra a plataforma".
+    if (!papelValidoParaSso(body.papel_padrao)) {
+      return c.json({ error: `papel_padrao não pode ser papel de plataforma: ${body.papel_padrao}` }, 400);
+    }
+
+    const chaveCripto = (c.env as any).TOKEN_ENC_KEY as string | undefined;
+    if (!chaveCripto) {
+      // Recusar é a decisão certa: gravar segredo de IdP em texto claro seria
+      // pior que não ter SSO.
+      return c.json({ error: 'TOKEN_ENC_KEY não configurada — o client_secret não pode ser gravado em claro.' }, 503);
+    }
+    const cifrado = await encryptSecret(body.client_secret, chaveCripto);
+
+    const ator = c.get('user')?.email ?? 'system';
+    await c.env.DB.prepare(
+      `INSERT INTO project_sso (project_id, issuer, client_id, client_secret, dominios, papel_padrao, ativo, atualizado_em, atualizado_por)
+       VALUES (?,?,?,?,?,?,?, datetime('now'), ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         issuer = excluded.issuer, client_id = excluded.client_id, client_secret = excluded.client_secret,
+         dominios = excluded.dominios, papel_padrao = excluded.papel_padrao, ativo = excluded.ativo,
+         atualizado_em = excluded.atualizado_em, atualizado_por = excluded.atualizado_por`
+    ).bind(
+      projectId, body.issuer, body.client_id, cifrado,
+      body.dominios.split(',').map((d: string) => d.trim().toLowerCase()).filter(Boolean).join(','),
+      body.papel_padrao, body.ativo ? 1 : 0, ator
+    ).run();
+
+    await logAudit(
+      c.env.DB, 'project.sso_updated', ator,
+      `SSO do projeto ${projectId}: issuer=${body.issuer}, dominios=${body.dominios}, ativo=${body.ativo ? 1 : 0}`,
+      '', '', projectId
+    );
+
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao gravar a configuração de SSO', e);
+  }
+});
+
+/**
+ * Política de segurança DESTE cliente (item 4.3 do plano).
+ *
+ * Leitura e escrita sob `/:projectId/`, então o `projectAccessMiddleware` já
+ * garante que ninguém lê nem escreve a política do vizinho.
+ *
+ * A escrita é restrita à equipe ness. de propósito, e é uma decisão de produto
+ * defensável nos dois sentidos: apertar a própria política é um pedido legítimo
+ * do cliente, mas AFROUXÁ-LA de dentro tornaria o controle inútil — quem
+ * conseguisse uma sessão de `org_admin` desligaria a exigência de MFA que existe
+ * justamente para impedir esse cenário. Enquanto não há um fluxo de aprovação, o
+ * pedido passa pela ness.
+ */
+projectsApp.get('/:projectId/security-policy', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const p = await c.env.DB.prepare(
+      'SELECT project_id, mfa_obrigatorio, sessao_ttl_seg, ip_allowlist, updated_at, updated_by FROM project_security_policy WHERE project_id = ?'
+    ).bind(projectId).first();
+    // Sem linha, devolve a postura padrão explicitamente em vez de 404: "não há
+    // política" é uma resposta, e a interface precisa dela para desenhar a tela.
+    return c.json({
+      ok: true,
+      politica: p ?? {
+        project_id: projectId,
+        mfa_obrigatorio: 0,
+        sessao_ttl_seg: null,
+        ip_allowlist: null,
+        padrao_da_plataforma: true,
+      },
+    });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao ler a política de segurança', e);
+  }
+});
+
+projectsApp.put('/:projectId/security-policy', somenteNess, async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const v = await validateBody(c, politicaTenantSchema);
+    if (!v.success) return v.response;
+    const body = v.data as any;
+
+    const projeto = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(projectId).first();
+    if (!projeto) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    // Uma allowlist que não casa com nada tranca o cliente inteiro para fora, e
+    // o conserto exige justamente o acesso que ela nega. Recusar entrada
+    // malformada AQUI é mais barato que descobrir depois.
+    const entradas = (body.ip_allowlist ?? '').split(',').map((x: string) => x.trim()).filter(Boolean);
+    const invalidas = entradas.filter((e: string) => !ipPermitido(e.split('/')[0], e));
+    if (invalidas.length) {
+      return c.json(
+        { error: `Entradas inválidas na allowlist (aceita IPv4 e CIDR IPv4): ${invalidas.join(', ')}` },
+        400
+      );
+    }
+
+    const ator = c.get('user')?.email ?? 'system';
+    await c.env.DB.prepare(
+      `INSERT INTO project_security_policy (project_id, mfa_obrigatorio, sessao_ttl_seg, ip_allowlist, updated_at, updated_by)
+       VALUES (?, ?, ?, ?, datetime('now'), ?)
+       ON CONFLICT(project_id) DO UPDATE SET
+         mfa_obrigatorio = excluded.mfa_obrigatorio,
+         sessao_ttl_seg = excluded.sessao_ttl_seg,
+         ip_allowlist = excluded.ip_allowlist,
+         updated_at = excluded.updated_at,
+         updated_by = excluded.updated_by`
+    ).bind(
+      projectId,
+      body.mfa_obrigatorio ? 1 : 0,
+      body.sessao_ttl_seg ?? null,
+      entradas.length ? entradas.join(',') : null,
+      ator
+    ).run();
+
+    await logAudit(
+      c.env.DB, 'project.security_policy_updated', ator,
+      `Política de segurança do projeto ${projectId}: mfa=${body.mfa_obrigatorio ? 1 : 0}, ttl=${body.sessao_ttl_seg ?? 'padrão'}, ips=${entradas.length}`,
+      '', '', projectId
+    );
+
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao gravar a política de segurança', e);
+  }
+});
+
+/**
+ * Portabilidade: o cliente inteiro, num arquivo (item 4.6 do plano; LGPD art.
+ * 18, V).
+ *
+ * A guarda de tenant é o `projectAccessMiddleware`, e o que a ativa é a FORMA DA
+ * URL, não o nome do parâmetro aqui: o `index.ts` registra
+ * `app.use('/api/v1/projects/:projectId/*', ...)`, que casa com
+ * `/api/v1/projects/<qualquer>/<algo>`. Verificado por mutação — renomear este
+ * parâmetro para `:id` mantém o 403 ao vizinho. (Uma versão anterior deste
+ * comentário afirmava o contrário; a mutação desmentiu.)
+ *
+ * O que o nome faz é ficar coerente com o que o middleware lê. E o detalhe que
+ * importa de verdade: o `/*` exige um segmento DEPOIS do id, então
+ * `GET /api/v1/projects/:id` — sem sufixo — NÃO passa pelo middleware e tem
+ * guarda própria no handler. Rota nova sob projeto que não tenha sufixo precisa
+ * lembrar disso.
+ *
+ * `somenteNess` NÃO é usado: o dado é do cliente, e o direito de levá-lo é dele.
+ * O papel read-only (`org_user`, `client`) alcança porque é GET.
+ */
+projectsApp.get('/:projectId/export', async (c) => {
+  try {
+    const projectId = c.req.param('projectId');
+    const projeto = await c.env.DB.prepare('SELECT id FROM projects WHERE id = ?').bind(projectId).first();
+    if (!projeto) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    const conteudo = await exportarProjeto(c.env, projectId);
+
+    await logAudit(
+      c.env.DB,
+      'project.exported',
+      c.get('user')?.email ?? 'system',
+      `Export de portabilidade do projeto ${projectId}: ${conteudo.manifesto.total_linhas} linhas`,
+      '', '', projectId
+    );
+
+    // `Content-Disposition`: o arquivo é para SAIR do produto — abrir como texto
+    // no navegador é o comportamento errado para um export de portabilidade.
+    return new Response(JSON.stringify(conteudo, null, 2), {
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Disposition': `attachment; filename="niso-export-${projectId}-${conteudo.manifesto.gerado_em.slice(0, 10)}.json"`,
+      },
+    });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao exportar o projeto', e);
+  }
+});
+
+// NUNCA devolver credenciais no corpo. `repository_token` é secret (uso só
+// server-side); redigido aqui — o cliente recebe apenas um booleano indicando se
+// há token configurado. Em repouso ele é cifrado (AES-GCM, ver secret-crypto.ts);
+// consumidores server-side leem via getRepositoryToken (decifra).
+function redactProject<T extends Record<string, any> | null | undefined>(p: T): T {
+  if (!p) return p;
+  const { repository_token, ...rest } = p as Record<string, any>;
+  return { ...rest, repository_token_set: !!repository_token } as unknown as T;
+}
+
+/**
+ * Lê o `repository_token` de um projeto DECIFRADO, para uso server-side (git ops).
+ * Ponto único de leitura: nenhum consumidor deve tocar a coluna direto. Tokens
+ * legados em texto claro (sem prefixo `v1:`) são devolvidos como estão.
+ */
+export async function getRepositoryToken(env: Bindings, projectId: string): Promise<string | null> {
+  const row = await env.DB.prepare('SELECT repository_token FROM projects WHERE id = ?').bind(projectId).first() as any;
+  const raw = row?.repository_token;
+  if (!raw) return null;
+  return decryptSecret(raw, env.TOKEN_ENC_KEY || '');
+}
 // controlsApp foi extraído para routes/controls.ts (mesmo path /api/v1/controls).
 
 
@@ -63,11 +345,11 @@ projectsApp.get('/', async (c) => {
       const project = await c.env.DB.prepare(
         'SELECT * FROM projects WHERE id = ?'
       ).bind(user.client_project_id).first();
-      return c.json(project ? [project] : []);
+      return c.json(project ? [redactProject(project)] : []);
     }
 
     const { results } = await c.env.DB.prepare('SELECT * FROM projects ORDER BY created_at DESC').all();
-    return c.json(results);
+    return c.json((results ?? []).map(redactProject));
   } catch (e: any) {
     return erro500(c, 'Falha ao listar projetos', e);
   }
@@ -83,7 +365,7 @@ projectsApp.get('/:id', async (c) => {
   }
   const project = await c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(id).first();
   if (!project) return c.json({ error: 'Project not found' }, 404);
-  return c.json(project);
+  return c.json(redactProject(project));
 });
 
 projectsApp.put('/:id', async (c) => {
@@ -100,13 +382,32 @@ projectsApp.put('/:id', async (c) => {
       project_name?: string;
       repository_url?: string;
       repository_token?: string;
+      standards?: string;
+      scope?: string;
     }>();
+    // `standards` não é editável por aqui — é derivado do control-set (definido
+    // pelos endpoints seed-27701-2025 / migrate). Erro EXPLÍCITO em vez do
+    // genérico "Nothing to update", que confundia (o campo estava presente).
+    if (body.standards !== undefined) {
+      return c.json({ error: 'O campo "standards" não é editável diretamente: ele é derivado do control-set. Use POST /:id/seed-27701-2025 ou os endpoints de migração.' }, 400);
+    }
     const updates: string[] = [];
     const values: any[] = [];
     if (body.status) { updates.push('status = ?'); values.push(body.status); }
     if (body.project_name !== undefined) { updates.push('project_name = ?'); values.push(body.project_name); }
+    // `scope` (escopo do SGSI / descrição, ex.: residência de dado) é gravável
+    // pelo mesmo modelo de permissão dos demais campos deste handler.
+    if (body.scope !== undefined) { updates.push('scope = ?'); values.push(body.scope); }
     if (body.repository_url !== undefined) { updates.push('repository_url = ?'); values.push(body.repository_url); }
-    if (body.repository_token !== undefined) { updates.push('repository_token = ?'); values.push(body.repository_token); }
+    if (body.repository_token !== undefined) {
+      // Cifra em repouso quando há chave. Sem TOKEN_ENC_KEY (dev/legado), grava
+      // como veio — o campo continua redigido nas respostas por redactProject.
+      const tokenParaGravar = (body.repository_token && c.env.TOKEN_ENC_KEY)
+        ? await encryptSecret(body.repository_token, c.env.TOKEN_ENC_KEY)
+        : body.repository_token;
+      updates.push('repository_token = ?');
+      values.push(tokenParaGravar);
+    }
     if (!updates.length) return c.json({ error: 'Nothing to update' }, 400);
     values.push(id);
     await c.env.DB.prepare(`UPDATE projects SET ${updates.join(', ')} WHERE id = ?`).bind(...values).run();
@@ -114,6 +415,94 @@ projectsApp.put('/:id', async (c) => {
     return c.json({ ok: true });
   } catch (e: any) {
     return erro500(c, 'Falha ao atualizar projeto', e);
+  }
+});
+
+// Revogação de aprovação EM LOTE (papel de escrita — o projectAccessMiddleware já
+// garante o tenant). Limpa o sign-off do papel indicado em vários controles do
+// projeto de uma vez. `reason` obrigatório; aterramento por project_id (só
+// controles DESTE projeto). Sem senha de aprovador nem admin. Ver revoke-approval
+// unitário em routes/controls.ts.
+projectsApp.post('/:id/revoke-approvals', async (c) => {
+  try {
+    const projectId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({} as any));
+    const role = body?.role;
+    const reason = String(body?.reason ?? '').trim();
+    const ids: string[] = Array.isArray(body?.control_ids) ? body.control_ids.filter((x: any) => typeof x === 'string' && x) : [];
+    if (role !== 'ciso' && role !== 'ceo') return c.json({ error: "Campo 'role' deve ser 'ciso' ou 'ceo'" }, 400);
+    if (!reason) return c.json({ error: "Campo 'reason' é obrigatório" }, 400);
+    if (!ids.length) return c.json({ error: "Campo 'control_ids' não pode ser vazio" }, 400);
+
+    const placeholders = ids.map(() => '?').join(',');
+    const res = await c.env.DB.prepare(
+      `UPDATE compliance_controls SET ${COLUNAS_REVOGACAO[role as 'ciso' | 'ceo']}, updated_at = datetime('now')
+       WHERE project_id = ? AND id IN (${placeholders})`
+    ).bind(projectId, ...ids).run();
+    const revogados = (res as any).meta?.changes ?? 0;
+
+    await logAudit(c.env.DB, 'control.approvals_revoked_batch', c.get('user')?.email ?? 'system', `Revogação em lote (${String(role).toUpperCase()}) de ${revogados} controle(s) no projeto ${projectId}. Motivo: ${reason}`, reason, '', projectId);
+    return c.json({ ok: true, role, revoked_count: revogados });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao revogar aprovações em lote', e);
+  }
+});
+
+// Reatribuição em lote do responsável (owner) dos controles de UM projeto:
+// troca `owner_from` por `owner_to` sem N chamadas ao PUT /controls/:id. `owner`
+// é metadado organizacional — não toca status, aprovações nem maturidade. O
+// isolamento por tenant vem do projectAccessMiddleware (mesmo padrão do lote de
+// revogação); o WHERE ainda amarra por project_id como defesa em profundidade.
+projectsApp.patch('/:id/controls', async (c) => {
+  try {
+    const projectId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({} as any));
+    // owner_from: valor atual a casar (obrigatório, não-vazio). owner_to: novo
+    // valor (obrigatório; string vazia limpa o responsável).
+    const ownerFrom = typeof body?.owner_from === 'string' ? body.owner_from.trim() : '';
+    const ownerTo = typeof body?.owner_to === 'string' ? body.owner_to : undefined;
+    if (!ownerFrom) return c.json({ error: "Campo 'owner_from' é obrigatório (responsável atual a reatribuir)" }, 400);
+    if (ownerTo === undefined) return c.json({ error: "Campo 'owner_to' é obrigatório (novo responsável; string vazia limpa)" }, 400);
+
+    const res = await c.env.DB.prepare(
+      `UPDATE compliance_controls SET owner = ?, updated_at = datetime('now')
+       WHERE project_id = ? AND owner = ?`
+    ).bind(ownerTo, projectId, ownerFrom).run();
+    const reatribuidos = (res as any).meta?.changes ?? 0;
+
+    await logAudit(c.env.DB, 'control.owner_reassigned_batch', c.get('user')?.email ?? 'system', `Reatribuição em lote de responsável: ${reatribuidos} controle(s) de "${ownerFrom}" para "${ownerTo || '(sem responsável)'}" no projeto ${projectId}`, '', '', projectId);
+    return c.json({ ok: true, owner_from: ownerFrom, owner_to: ownerTo, reassigned_count: reatribuidos });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao reatribuir responsável em lote', e);
+  }
+});
+
+// Migração idempotente: cifra em repouso os repository_token gravados em texto
+// claro (pré-D1). Só platform_admin; exige TOKEN_ENC_KEY configurada. Rodar uma
+// vez após provisionar o secret. Reexecutar é seguro — o que já está cifrado
+// (prefixo v1:) é pulado.
+projectsApp.post('/admin/encrypt-tokens', async (c) => {
+  try {
+    if (c.get('user')?.role !== 'platform_admin') {
+      return c.json({ error: 'Forbidden: requer platform_admin' }, 403);
+    }
+    if (!c.env.TOKEN_ENC_KEY) {
+      return c.json({ error: 'TOKEN_ENC_KEY não configurada; nada a fazer' }, 400);
+    }
+    const { results } = await c.env.DB.prepare(
+      "SELECT id, repository_token FROM projects WHERE repository_token IS NOT NULL AND repository_token != ''"
+    ).all();
+    let cifrados = 0, jaCifrados = 0;
+    for (const row of (results || []) as any[]) {
+      if (isEncrypted(row.repository_token)) { jaCifrados++; continue; }
+      const enc = await encryptSecret(row.repository_token, c.env.TOKEN_ENC_KEY);
+      await c.env.DB.prepare('UPDATE projects SET repository_token = ? WHERE id = ?').bind(enc, row.id).run();
+      cifrados++;
+    }
+    await logAudit(c.env.DB, 'projects.tokens_encrypted', c.get('user')?.email ?? 'system', `Tokens cifrados: ${cifrados}; já cifrados: ${jaCifrados}`, '', '', '');
+    return c.json({ ok: true, cifrados, ja_cifrados: jaCifrados });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao cifrar tokens', e);
   }
 });
 
@@ -150,7 +539,14 @@ projectsApp.put('/:id/phases/:num', async (c) => {
     if (notes !== undefined) { updates.push('notes = ?'); values.push(notes); }
     if (!updates.length) return c.json({ error: 'Nothing to update' }, 400);
     values.push(projectId, num);
-    await c.env.DB.prepare(`UPDATE project_phases SET ${updates.join(', ')} WHERE project_id = ? AND phase_number = ?`).bind(...values).run();
+    const res = await c.env.DB.prepare(`UPDATE project_phases SET ${updates.join(', ')} WHERE project_id = ? AND phase_number = ?`).bind(...values).run();
+    // Fim do no-op silencioso: a rota casa por `phase_number` (0..N), não por
+    // phase_id. Um `num` inexistente (ex.: id passado no lugar do número) casava
+    // 0 linhas e ainda devolvia {ok:true} — indistinguível de gravação real.
+    // Agora 0 linhas afetadas = 404 explícito.
+    if (((res as any).meta?.changes ?? 0) === 0) {
+      return c.json({ error: `Fase ${num} não encontrada no projeto ${projectId}. Use o phase_number (0..N), não o phase_id.` }, 404);
+    }
     await logAudit(c.env.DB, 'phase.updated', c.get('user')?.email ?? 'system', `Fase ${num} do projeto ${projectId} atualizada`, '', '', projectId);
     return c.json({ ok: true });
   } catch (e: any) {
@@ -228,7 +624,7 @@ projectsApp.post('/:id/documents/upload', async (c) => {
     const user = c.get('user');
     await c.env.DB.prepare(
       `INSERT INTO evidence (id, project_id, file_name, file_size, file_type, r2_key, file_hash, evaluation_status, evaluation_notes, uploaded_by, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'conforme', 'Documento Interno do SGSI Controlado', ?, datetime('now'))`
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'conforming', 'Documento Interno do SGSI Controlado', ?, datetime('now'))`
     ).bind(docId, projectId, file.name, file.size, file.type || 'application/octet-stream', r2Key, realSha256, user?.email || 'system').run();
 
     await logAudit(c.env.DB, 'document.uploaded', user?.email || 'system', `Documento ${file.name} carregado para projeto ${projectId}`, '', '', projectId);
@@ -418,6 +814,60 @@ projectsApp.post('/:id/migrate-27701-2025', async (c) => {
     });
   } catch (e: any) {
     return erro500(c, 'Falha na migração 27701:2025', e);
+  }
+});
+
+// Semeia o control-set 27701:2025 (Anexo A) DO ZERO, por papel do projeto.
+//
+// O migrate-27701-2025 acima só TRANSFORMA um SoA 27701:2019 existente — inútil
+// para projetos sem base 2019 (a maioria: eles têm só os 93 do 27001:2022). Este
+// endpoint cria os controles de privacidade da edição 2025 (Tabela A.1 Controlador
+// e/ou A.2 Operador, conforme org_role) como 'Missing', para o SGPI existir de
+// fato. Idempotente: re-rodar não duplica. Também garante o rótulo da norma.
+projectsApp.post('/:id/seed-27701-2025', async (c) => {
+  try {
+    const projectId = c.req.param('id');
+    const proj = await c.env.DB.prepare('SELECT id, org_role, standards FROM projects WHERE id = ?')
+      .bind(projectId).first<{ id: string; org_role: string; standards: string }>();
+    if (!proj) return c.json({ error: 'Projeto não encontrado' }, 404);
+
+    const wanted = controlsForRole(proj.org_role);
+
+    // Idempotência: o código do controle vive como primeiro token do título
+    // (ex.: "A.1.2.2 — ..."). Pula o que já foi semeado.
+    const { results: existing } = await c.env.DB.prepare(
+      'SELECT title FROM compliance_controls WHERE project_id = ? AND standard = ?'
+    ).bind(projectId, ISO_27701_2025_STANDARD).all<{ title: string }>();
+    const existingCodes = new Set((existing || []).map((r) => (r.title || '').split(' ')[0]));
+
+    let created = 0;
+    for (const ctrl of wanted) {
+      if (existingCodes.has(ctrl.code)) continue;
+      await c.env.DB.prepare(
+        `INSERT INTO compliance_controls (id, project_id, standard, title, description, status, maturity, updated_at)
+         VALUES (?, ?, ?, ?, '', 'Missing', 0, datetime('now'))`
+      ).bind(genId(), projectId, ISO_27701_2025_STANDARD, `${ctrl.code} — ${ctrl.title}`).run();
+      created++;
+    }
+
+    // Rótulo da norma: garante 27701:2025 (substitui 2019 se presente).
+    let standards = (proj.standards || '').toString();
+    if (!/27701:2025/.test(standards)) {
+      standards = /27701:2019/.test(standards)
+        ? standards.replace(/(ISO\/?\s*(?:IEC\s*)?)27701:2019/i, `$1${'27701:2025'}`)
+        : (standards ? `${standards}, ${ISO_27701_2025_STANDARD}` : ISO_27701_2025_STANDARD);
+      await c.env.DB.prepare('UPDATE projects SET standards = ? WHERE id = ?').bind(standards, projectId).run();
+    }
+
+    await logAudit(
+      c.env.DB, 'seed.27701.2025', c.get('user')?.email ?? 'system',
+      `Seed 27701:2025 (${proj.org_role || 'Controller'}): ${created} controles criados, ${wanted.length - created} já existiam, projeto ${projectId}`,
+      '', c.req.header('CF-Connecting-IP') ?? '', projectId,
+    );
+
+    return c.json({ ok: true, standard: ISO_27701_2025_STANDARD, role: proj.org_role, seeded: created, catalog_total: wanted.length, standards });
+  } catch (e: any) {
+    return erro500(c, 'Falha ao semear controles 27701:2025', e);
   }
 });
 

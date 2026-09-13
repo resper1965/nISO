@@ -9,6 +9,11 @@ name: Deploy
 #   1. Secret `CLOUDFLARE_API_TOKEN` com permissão de editar Workers.
 #   2. Environment `production`. Marque "Required reviewers" nele se quiser que
 #      todo deploy passe por aprovação humana — é onde esse controle vive.
+#   3. Para o passo de staging (item 2.2 do plano): environment `staging` e a
+#      VARIÁVEL de repositório `STAGING_ATIVO` = `true`. Enquanto a variável não
+#      existir, o job de staging é PULADO e produção segue como antes — o
+#      ambiente ainda depende de recursos não provisionados (ver docs/staging.md),
+#      e um gate que não pode passar pararia toda a entrega.
 #
 # O que este workflow NÃO faz, de propósito: aplicar migration. Migration em
 # produção exige backup verificado antes (`npm run db:backup`, runbook em
@@ -33,8 +38,63 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Staging vem ANTES de produção: é o ensaio, e o valor dele é justamente ser o
+  # primeiro a quebrar. Pulado enquanto `vars.STAGING_ATIVO` não for `true` —
+  # e o pulo aparece no log, não em silêncio.
+  staging:
+    runs-on: ubuntu-latest
+    if: vars.STAGING_ATIVO == 'true'
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build Frontend
+        run: cd frontend && npm ci && npm run build
+
+      # Em staging a migration é APLICADA, não recusada — é para isso que ele
+      # existe. Falhar aqui é o resultado útil: a mesma migration teria falhado
+      # em produção, onde não há rollback.
+      - name: Aplicar migrations em staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler d1 migrations apply niso-db-staging --remote --env staging
+
+      # `npx wrangler` direto, e não a `cloudflare/wrangler-action`: o passo de
+      # migration logo acima já usa o CLI, então é o mesmo binário e a mesma
+      # versão do `package-lock.json`. De quebra, mantém o token fora de mais
+      # uma action de terceiro presa a tag móvel — o CodeQL sinaliza justamente
+      # isso, e aqui não havia razão para adicionar a dependência.
+      - name: Deploy staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: npx wrangler deploy --env staging --var VERSAO_SHA:${{ github.sha }}
+
+      # A mesma sonda da seção 0 do runbook. `/health` só prova que ALGUM código
+      # subiu; o login com corpo vazio prova que é o código esperado, porque a
+      # resposta carrega o envelope de validação.
+      - name: Sonda de fumaça em staging
+        run: |
+          set -o pipefail
+          base=https://niso-staging.ness.workers.dev
+          código=$(curl -s -o /dev/null -w "%{http_code}" "$base/health")
+          [ "$código" = "200" ] || { echo "::error::/health devolveu $código"; exit 1; }
+          corpo=$(curl -s -X POST -H "Content-Type: application/json" -d '{}' "$base/api/v1/auth/login")
+          echo "$corpo"
+          echo "$corpo" | grep -q 'Payload inválido' || {
+            echo "::error::login com corpo vazio não devolveu o envelope de validação — código antigo ou quebrado no ar"
+            exit 1
+          }
+
   deploy:
     runs-on: ubuntu-latest
+    # `always()` porque `needs` sozinho bloquearia produção quando staging é
+    # PULADO (que é o estado atual). O que não pode passar é staging FALHO.
+    needs: [staging]
+    if: always() && needs.staging.result != 'failure' && needs.staging.result != 'cancelled'
     environment: production
     steps:
       - uses: actions/checkout@v7
@@ -74,15 +134,21 @@ jobs:
           echo "::error::Há migration não aplicada em produção. Faça backup (npm run db:backup), aplique com 'wrangler d1 migrations apply niso-db --remote' e rode este workflow de novo."
           exit 1
 
+      # `--var VERSAO_SHA`: é o que faz `/health` dizer QUAL código está no ar.
+      # Sem isso a sonda de produção depende de heurística — mandar um login
+      # vazio e olhar o formato do erro —, que passa a mentir no dia em que o
+      # envelope de validação mudar.
       - name: Deploy
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          command: deploy --var VERSAO_SHA:${{ github.sha }}
 
       # A falha mais cara aqui é a SILENCIOSA: o deploy parou (ex.: migration
       # pendente) e ninguém viu por dias, então `main` acumulou correções que
-      # nunca saíram. Este passo torna a falha visível abrindo (ou comentando)
-      # uma issue com o rótulo `deploy-failure` e o link do run + a remediação.
+      # nunca saíram. Este passo torna a falha visível numa issue única com o
+      # rótulo `deploy-failure`. ATUALIZA o corpo da issue existente em vez de
+      # empilhar um comentário por falha (a #102 acumulou 25) — uma issue, um estado.
       - name: Avisar falha de deploy
         if: failure()
         uses: actions/github-script@v7
@@ -94,15 +160,29 @@ jobs:
               ``,
               `Run: ${run}`,
               ``,
-              `Causa mais comum: **migration pendente**. Aplique com`,
-              '`npx wrangler d1 migrations apply niso-db --remote`',
-              `e re-execute o workflow de Deploy. Enquanto isso, o que está em`,
-              `\`main\` NÃO está em produção.`,
+              `Causa mais comum: **migration pendente**. Aplique pela aba Actions →`,
+              `workflow **Apply DB migrations (manual)** (faz backup + aplica), depois`,
+              `re-execute o **Deploy**. Enquanto isso, o que está em \`main\` NÃO está`,
+              `em produção.`,
             ].join('\n');
             const { owner, repo } = context.repo;
             const abertas = await github.rest.issues.listForRepo({ owner, repo, state: 'open', labels: 'deploy-failure' });
             if (abertas.data.length) {
-              await github.rest.issues.createComment({ owner, repo, issue_number: abertas.data[0].number, body });
+              await github.rest.issues.update({ owner, repo, issue_number: abertas.data[0].number, body });
             } else {
               await github.rest.issues.create({ owner, repo, title: 'Deploy de produção falhou', body, labels: ['deploy-failure'] });
+            }
+
+      # Deploy verde: fecha qualquer issue de falha aberta — o motivo não existe mais.
+      - name: Fechar issue de falha (deploy verde)
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const abertas = await github.rest.issues.listForRepo({ owner, repo, state: 'open', labels: 'deploy-failure' });
+            for (const it of abertas.data) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: it.number, body: `Deploy verde no commit \`${context.sha.slice(0,7)}\` (${run}). Fechando.` });
+              await github.rest.issues.update({ owner, repo, issue_number: it.number, state: 'closed', state_reason: 'completed' });
             }

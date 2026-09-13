@@ -4,7 +4,7 @@ import { PHASE_POLICY_DOCS, ChecklistItem } from '../checklists';
 import { genId, logAudit, escapeHtml, erro500, registraErro } from '../helpers';
 import { PolicyAgent } from '../agents/policy';
 import { MemoryService } from '../services/memory';
-import { PolicyGeneratorService } from '../services/policy-generator';
+import { PolicyGeneratorService, TemplateNaoEncontrado } from '../services/policy-generator';
 
 const policies = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -217,7 +217,7 @@ policies.post('/api/v1/projects/:id/approve-document', async (c) => {
     const fileName = `${item.text}.md`;
     await c.env.DB.prepare(
       'INSERT INTO evidence (id, project_id, file_name, r2_key, file_hash, file_type, file_size, uploaded_by, evaluation_status, evaluation_notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    ).bind(evidenceId, projectId, fileName, r2Key, hashHex, 'text/markdown', data.byteLength, userEmail, 'conforme', 'Documento gerado e aprovado via wizard guiado.').run();
+    ).bind(evidenceId, projectId, fileName, r2Key, hashHex, 'text/markdown', data.byteLength, userEmail, 'conforming', 'Documento gerado e aprovado via wizard guiado.').run();
 
     // Auto-check checklist item
     await c.env.DB.prepare(
@@ -291,7 +291,7 @@ policies.post('/api/v1/projects/:id/checklist/:itemId/generate', async (c) => {
       'text/markdown',
       fileSize,
       userEmail,
-      'conforme',
+      'conforming',
       'Documento gerado internamente pelo assistente de IA.'
     ).run();
 
@@ -553,6 +553,8 @@ policies.get('/api/v1/policies/templates/:templateName', async (c) => {
     });
     return c.json({ ok: true, markdown });
   } catch (e: any) {
+    // Nome de template que não existe é pedido inválido, não falha do servidor.
+    if (e instanceof TemplateNaoEncontrado) return c.json({ error: 'Template não encontrado' }, 404);
     return erro500(c, 'Falha ao obter conteúdo do template', e);
   }
 });
@@ -609,6 +611,9 @@ policies.post('/api/v1/projects/:id/policies/generate-from-template', async (c) 
       control: control_id
     });
   } catch (e: any) {
+    // Mesma distinção da rota de leitura: `template_name` vem do cliente, então
+    // template inexistente é 404 do pedido, não 500 nosso.
+    if (e instanceof TemplateNaoEncontrado) return c.json({ error: 'Template não encontrado' }, 404);
     return erro500(c, 'Falha ao gerar política a partir de template', e);
   }
 });

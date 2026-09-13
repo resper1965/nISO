@@ -1,161 +1,200 @@
-// Trilha de auditoria por CAMPO: `campo: antes → depois`, com autor, quando e
-// o id da operação que agrupa o lote.
-//
-// A tabela (`audit_logs`) é append-only por trigger do banco, e continua sendo:
-// desfazer NÃO apaga linha. O pacote de design descreve o desfazer como janela
-// PRÉ-COMMIT, em que a entrada só entraria no log depois de a janela fechar.
-// Num Worker não há como segurar uma escrita por N segundos e garantir que ela
-// aconteça: quem fecha a aba leva a entrada junto, e trilha de SGSI perdida é
-// pior do que trilha com um par de linhas a mais. Então a operação é gravada na
-// hora e o desfazer vira um registro próprio, ligado pelo `operation_id`; a
-// LEITURA é que esconde o par (ver `colapsaDesfeitas`). O banco guarda os dois
-// fatos, que é o que o auditor exporta; a tela mostra o que aconteceu de
-// líquido, que é o que o consultor precisa ler.
+import { log } from './observability';
+import type { Bindings } from './index';
 
-import { genId } from './helpers';
+/**
+ * Arquivamento da trilha de auditoria FORA do D1 (item 4.4 do
+ * `enterprise-grade-plan.md`).
+ *
+ * O que já existia, e o que faltava.
+ *
+ * A migration `0018_data_hardening.sql` cria `audit_logs_no_update` e
+ * `audit_logs_no_delete`, e os dois estão em produção (conferido em
+ * `sqlite_master`). Eles barram `UPDATE` e `DELETE` no nível do banco — ou seja,
+ * a trilha já é append-only contra erro de aplicação e contra comando avulso.
+ *
+ * O que eles NÃO barram é quem administra o banco: `DROP TRIGGER` é uma linha, e
+ * depois dela a trilha vira uma tabela comum. Para uma trilha valer contra
+ * ADULTERAÇÃO DELIBERADA por quem tem esse acesso, ela precisa existir em outro
+ * lugar, com outro controle de acesso.
+ *
+ * As colunas da trilha por campo (`entity_*`, `field`, `old_value`, `new_value`,
+ * `operation_id` — migration 0030) entram no arquivo: sem elas o "antes → depois"
+ * que a tela mostra não estaria no que o auditor exporta.
+ *
+ * COMO ISTO FUNCIONA. Uma vez por dia o cron arquiva o dia anterior num objeto
+ * JSONL no R2 (bucket `niso-trilha`, separado do de evidências), e cada objeto
+ * carrega o SHA-256 do ANTERIOR. Os dias formam uma cadeia: alterar um dia
+ * antigo quebra o encadeamento de todos os posteriores, e a verificação
+ * percorre a cadeia inteira sem consultar o D1.
+ *
+ * O QUE ISTO PROVA, E O QUE NÃO PROVA — e a diferença importa num produto de
+ * GRC, onde a frase "trilha imutável" acaba num relatório:
+ *
+ *   - PROVA que a trilha de um dia já arquivado não foi alterada depois, para
+ *     quem tem acesso apenas ao D1. Quebrar a cadeia sem ser notado exige
+ *     reescrever TODOS os dias seguintes no R2.
+ *   - NÃO prova nada contra quem tem acesso de escrita ao bucket E ao D1 ao
+ *     mesmo tempo. Fechar isso exige um destino que o produto não possa
+ *     reescrever — bucket com retenção/object-lock, ou terceiro depositário.
+ *     É o degrau seguinte, e está declarado no `docs/runbook-incidente.md` em
+ *     vez de subentendido.
+ *   - NÃO cobre o dia CORRENTE: o que ainda não foi arquivado só existe no D1.
+ */
 
-/** Prefixo do `action` que marca uma operação desfeita. */
-export const ACAO_DESFEITA = 'trilha.undone';
+/** Prefixo dos objetos no bucket da trilha. */
+const PREFIXO = 'trilha';
 
-export interface AlteracaoDeCampo {
-  /** Nome do campo em PT-BR, como o usuário o vê — nunca a chave interna. */
-  campo: string;
-  antes: string | number | null | undefined;
-  depois: string | number | null | undefined;
+/** Objeto que guarda o digest do último dia arquivado — o elo da cadeia. */
+const PONTEIRO = `${PREFIXO}/ultimo.json`;
+
+export type ResultadoArquivamento = {
+  dia: string;
+  linhas: number;
+  sha256: string;
+  anterior_sha256: string | null;
+  /** Já estava arquivado; nada foi reescrito. */
+  ja_existia: boolean;
+};
+
+function hex(buf: ArrayBuffer): string {
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export interface RegistroTrilha {
-  id: string;
-  acao: string;
-  autor: string;
-  quando: string;
-  campo: string | null;
-  antes: string | null;
-  depois: string | null;
-  operacao: string | null;
-  /** Quantos campos a MESMA operação alterou: é o marcador de lote. */
-  itensNaOperacao: number;
+async function sha256(texto: string): Promise<string> {
+  return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto)));
 }
 
-export function novaOperacao(): string {
-  return genId();
+/** `2026-09-05` → `trilha/2026/09/2026-09-05.jsonl` */
+export function chaveDoDia(dia: string): string {
+  const [ano, mes] = dia.split('-');
+  return `${PREFIXO}/${ano}/${mes}/${dia}.jsonl`;
 }
 
-/** `null` de CMMI vira `—`, nunca a palavra "null" na tela do auditor. */
-export function valorParaTrilha(v: unknown): string {
-  if (v === null || v === undefined || v === '') return '—';
-  return String(v);
-}
-
-/** Só entra na trilha o campo que de fato mudou. */
-export function apenasMudancas(alteracoes: AlteracaoDeCampo[]): AlteracaoDeCampo[] {
-  return alteracoes.filter(a => valorParaTrilha(a.antes) !== valorParaTrilha(a.depois));
+/** Data (UTC) de N dias atrás, em `YYYY-MM-DD`. */
+export function diaAtras(n: number, agora = new Date()): string {
+  const d = new Date(agora.getTime() - n * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
 }
 
 /**
- * Uma linha por campo alterado, todas com o mesmo `operation_id`.
- * Devolve o id da operação, ou null quando nada mudou — operação sem mudança
- * não é fato, e poluir a trilha com ela esconde as que importam.
+ * Arquiva um dia. Idempotente: se o objeto já existe, NÃO reescreve.
+ *
+ * A idempotência é a parte que protege a cadeia. Um cron que roda duas vezes,
+ * ou um retry, não pode regravar um dia — regravar é exatamente a operação que
+ * a cadeia existe para tornar detectável.
  */
-export async function registrarAlteracoes(
-  db: D1Database,
-  params: {
-    acao: string;
-    autor: string;
-    entidade: string;
-    entidadeId: string;
-    projectId?: string | null;
-    alteracoes: AlteracaoDeCampo[];
-    operacao?: string;
-    ip?: string;
+export async function arquivarDia(env: Bindings, dia: string): Promise<ResultadoArquivamento> {
+  const bucket = (env as any).TRILHA as R2Bucket | undefined;
+  if (!bucket) throw new Error('Binding TRILHA (R2) ausente — a trilha não pode ser arquivada.');
+
+  const chave = chaveDoDia(dia);
+  const existente = await bucket.head(chave);
+  if (existente) {
+    return {
+      dia,
+      linhas: Number(existente.customMetadata?.linhas ?? 0),
+      sha256: existente.customMetadata?.sha256 ?? '',
+      anterior_sha256: existente.customMetadata?.anterior ?? null,
+      ja_existia: true,
+    };
   }
-): Promise<string | null> {
-  const mudancas = apenasMudancas(params.alteracoes);
-  if (!mudancas.length) return null;
 
-  const operacao = params.operacao ?? novaOperacao();
-  for (const m of mudancas) {
-    await db.prepare(
-      `INSERT INTO audit_logs
-         (id, action, actor, details, justification, ip_address, project_id,
-          entity_type, entity_id, field, old_value, new_value, operation_id, created_at)
-       VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
-    ).bind(
-      genId(), params.acao, params.autor,
-      `${m.campo}: ${valorParaTrilha(m.antes)} → ${valorParaTrilha(m.depois)}`,
-      params.ip ?? '', params.projectId ?? null,
-      params.entidade, params.entidadeId, m.campo,
-      valorParaTrilha(m.antes), valorParaTrilha(m.depois), operacao
-    ).run();
-  }
-  return operacao;
-}
+  const { results } = await env.DB.prepare(
+    `SELECT id, action, actor, details, justification, ip_address, project_id, created_at,
+            entity_type, entity_id, field, old_value, new_value, operation_id
+     FROM audit_logs
+     WHERE date(created_at) = ?
+     ORDER BY created_at, id`
+  ).bind(dia).all();
 
-/** Marca uma operação como desfeita. Não apaga nada — a tabela é append-only. */
-export async function registrarDesfazer(
-  db: D1Database,
-  params: { autor: string; operacao: string; projectId?: string | null; entidade: string; entidadeId: string }
-): Promise<void> {
-  await db.prepare(
-    `INSERT INTO audit_logs
-       (id, action, actor, details, justification, ip_address, project_id,
-        entity_type, entity_id, operation_id, created_at)
-     VALUES (?, ?, ?, ?, '', '', ?, ?, ?, ?, datetime('now'))`
-  ).bind(
-    genId(), ACAO_DESFEITA, params.autor,
-    `Operação ${params.operacao} desfeita`,
-    params.projectId ?? null, params.entidade, params.entidadeId, params.operacao
-  ).run();
-}
+  const linhas = (results ?? []) as Record<string, unknown>[];
 
-/**
- * Esconde da LEITURA as operações desfeitas e o próprio registro de desfazer:
- * um lote marcado e revertido dez segundos depois não é história, é ruído — e
- * ruído no histórico esconde as alterações que valem. As linhas continuam no
- * banco para quem exporta a trilha crua.
- */
-export function colapsaDesfeitas<T extends { acao: string; operacao: string | null }>(linhas: T[]): T[] {
-  const desfeitas = new Set(
-    linhas.filter(l => l.acao === ACAO_DESFEITA && l.operacao).map(l => l.operacao as string)
+  const ponteiro = await bucket.get(PONTEIRO);
+  const anterior = ponteiro ? ((await ponteiro.json()) as { sha256: string }).sha256 : null;
+
+  // JSONL: uma entrada por linha. Formato de append por natureza, legível por
+  // `grep` e por `jq -s`, e que não exige carregar o dia inteiro em memória para
+  // conferir. O digest cobre o CORPO mais o elo anterior — sem incluir o elo,
+  // reordenar dias passaria despercebido.
+  const corpo = linhas.map((l) => JSON.stringify(l)).join('\n') + (linhas.length ? '\n' : '');
+  const digest = await sha256(`${anterior ?? 'GENESIS'}\n${corpo}`);
+
+  await bucket.put(chave, corpo, {
+    httpMetadata: { contentType: 'application/x-ndjson' },
+    customMetadata: {
+      dia,
+      linhas: String(linhas.length),
+      sha256: digest,
+      anterior: anterior ?? 'GENESIS',
+    },
+  });
+
+  await bucket.put(
+    PONTEIRO,
+    JSON.stringify({ dia, sha256: digest, atualizado_em: new Date().toISOString() }),
+    { httpMetadata: { contentType: 'application/json' } }
   );
-  return linhas.filter(l => l.acao !== ACAO_DESFEITA && !(l.operacao && desfeitas.has(l.operacao)));
+
+  log('info', { msg: 'trilha_arquivada', dia, linhas: linhas.length, sha256: digest });
+
+  return { dia, linhas: linhas.length, sha256: digest, anterior_sha256: anterior, ja_existia: false };
 }
 
-/** Trilha de uma entidade, mais recente primeiro, sem o que foi desfeito. */
-export async function lerTrilha(
-  db: D1Database,
-  entidade: string,
-  entidadeId: string,
-  limite = 100
-): Promise<RegistroTrilha[]> {
-  const { results } = await db.prepare(
-    `SELECT id, action, actor, created_at, field, old_value, new_value, operation_id
-       FROM audit_logs
-      WHERE entity_type = ? AND entity_id = ?
-      ORDER BY created_at DESC, rowid DESC
-      LIMIT ?`
-  ).bind(entidade, entidadeId, limite).all();
+export type Verificacao = {
+  dias: number;
+  intacta: boolean;
+  /** Dias em que a cadeia não fecha, com o motivo. Vazio quando intacta. */
+  quebras: string[];
+};
 
-  const linhas = (results || []).map((r: any) => ({
-    id: r.id,
-    acao: r.action,
-    autor: r.actor,
-    quando: r.created_at,
-    campo: r.field ?? null,
-    antes: r.old_value ?? null,
-    depois: r.new_value ?? null,
-    operacao: r.operation_id ?? null,
-    itensNaOperacao: 1,
-  }));
+/**
+ * Percorre a cadeia e reconfere cada elo — recalculando o digest do conteúdo,
+ * não apenas comparando metadados.
+ *
+ * Comparar só o `customMetadata` seria teatro: quem reescreve o objeto reescreve
+ * o metadado junto. O que prende o dia é o digest do CORPO encadeado ao anterior.
+ */
+export async function verificarCadeia(env: Bindings): Promise<Verificacao> {
+  const bucket = (env as any).TRILHA as R2Bucket | undefined;
+  if (!bucket) throw new Error('Binding TRILHA (R2) ausente.');
 
-  const visiveis = colapsaDesfeitas(linhas);
-  // Marcador de lote: quantas linhas a mesma operação produziu.
-  const porOperacao = new Map<string, number>();
-  for (const l of visiveis) {
-    if (l.operacao) porOperacao.set(l.operacao, (porOperacao.get(l.operacao) ?? 0) + 1);
+  const objetos: { key: string; dia: string }[] = [];
+  let cursor: string | undefined;
+  do {
+    const pagina = await bucket.list({ prefix: `${PREFIXO}/`, cursor, include: ['customMetadata'] });
+    for (const o of pagina.objects) {
+      if (!o.key.endsWith('.jsonl')) continue;
+      objetos.push({ key: o.key, dia: o.customMetadata?.dia ?? o.key });
+    }
+    cursor = pagina.truncated ? pagina.cursor : undefined;
+  } while (cursor);
+
+  objetos.sort((a, b) => a.dia.localeCompare(b.dia));
+
+  const quebras: string[] = [];
+  let esperadoAnterior: string | null = null;
+
+  for (const { key, dia } of objetos) {
+    const obj = await bucket.get(key);
+    if (!obj) {
+      quebras.push(`${dia}: objeto sumiu entre o list e o get`);
+      continue;
+    }
+    const corpo = await obj.text();
+    const anteriorGravado = obj.customMetadata?.anterior ?? 'GENESIS';
+    const digestGravado = obj.customMetadata?.sha256 ?? '';
+
+    if (esperadoAnterior !== null && anteriorGravado !== esperadoAnterior) {
+      quebras.push(`${dia}: elo anterior é ${anteriorGravado.slice(0, 12)}…, esperado ${esperadoAnterior.slice(0, 12)}…`);
+    }
+
+    const recalculado = await sha256(`${anteriorGravado}\n${corpo}`);
+    if (recalculado !== digestGravado) {
+      quebras.push(`${dia}: conteúdo não bate com o sha256 gravado (adulteração ou gravação parcial)`);
+    }
+
+    esperadoAnterior = digestGravado;
   }
-  return visiveis.map(l => ({
-    ...l,
-    itensNaOperacao: l.operacao ? (porOperacao.get(l.operacao) ?? 1) : 1,
-  }));
+
+  return { dias: objetos.length, intacta: quebras.length === 0, quebras };
 }

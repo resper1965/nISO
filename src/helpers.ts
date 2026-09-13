@@ -51,6 +51,18 @@ export function registraErro(c: any, e: unknown): string {
   return rid;
 }
 
+/**
+ * Registra uma entrada no trilho de auditoria (append-only; ver schema.sql —
+ * triggers `audit_logs_no_update`/`_no_delete` garantem imutabilidade, controle
+ * de integridade de log da ISO 27001 A.8.15).
+ *
+ * S-log — minimização (LGPD/ISO 27701): `details` descreve a AÇÃO e o ALVO
+ * (ids, nomes de entidade de negócio, ação), nunca CONTEÚDO de titular de dados
+ * (texto de perguntas ao AI, corpo de mensagens, respostas de formulário). O
+ * `actor` (e-mail) é retido de propósito: identificar quem fez o quê é a própria
+ * finalidade do trilho. Como a tabela é imutável por design, a minimização é
+ * feita na ESCRITA — não há como "limpar" depois sem quebrar a imutabilidade.
+ */
 export async function logAudit(
   db: D1Database,
   action: string,
@@ -85,6 +97,26 @@ export async function createNotification(
   ).bind(genId(), userId || null, type, title, message, link || null, actionType || null, targetId || null).run();
 }
 
+/**
+ * O que a autorização precisa saber sobre quem está pedindo.
+ *
+ * As três funções abaixo recebiam `user: any`, e `any` numa função de
+ * autorização é pior que em qualquer outro lugar: um chamador que passe o
+ * objeto errado — a linha do banco em vez da sessão, por exemplo — compila, e o
+ * `user.client_project_id` vira `undefined`, o que a comparação trata como "não
+ * bate" ou "bate com outro undefined" conforme o caso. Só o tipo pega isso, e
+ * pega antes de rodar.
+ *
+ * Deliberadamente estrutural (não `Variables['user']`): o que essas funções
+ * exigem é papel e escopo, e nada mais. Assim `test/` e chamadores que só têm
+ * esses dois campos seguem servindo, sem `as any` de conveniência — que
+ * devolveria o buraco pela porta dos fundos.
+ */
+export interface AtorAutorizado {
+  role?: string;
+  client_project_id?: string | null;
+}
+
 const ALLOWED_TABLES = [
   'risks', 'vendors', 'training_records', 'ropa_records', 'corrective_actions',
   'compliance_controls', 'evidence', 'assets', 'stakeholders', 'dpia_assessments',
@@ -92,13 +124,13 @@ const ALLOWED_TABLES = [
   'performance_metrics', 'webhooks', 'api_keys', 'auditor_notes'
 ];
 
-export async function requireResourceAccess(db: D1Database, table: string, resourceId: string, user: any) {
+export async function requireResourceAccess(db: D1Database, table: string, resourceId: string, user: AtorAutorizado) {
   if (!ALLOWED_TABLES.includes(table)) {
     throw new Error('Invalid table');
   }
   if (user.role === 'consultor' || user.role === 'platform_admin' || user.role === 'consultant') return true;
 
-  const row = await db.prepare(`SELECT project_id FROM ${table} WHERE id = ?`).bind(resourceId).first() as any;
+  const row = await db.prepare(`SELECT project_id FROM ${table} WHERE id = ?`).bind(resourceId).first<{ project_id: string | null }>();
   if (!row || row.project_id !== user.client_project_id) {
     throw new Error('Forbidden: No access to this resource');
   }
@@ -110,7 +142,7 @@ export async function requireResourceAccess(db: D1Database, table: string, resou
  * platform_admin/consultant) têm acesso total; demais papéis são restritos ao
  * seu client_project_id. Lança em caso de negação (fail-closed).
  */
-export function requireProjectAccess(user: any, projectId: string): true {
+export function requireProjectAccess(user: AtorAutorizado, projectId: string): true {
   if (user.role === 'consultor' || user.role === 'platform_admin' || user.role === 'consultant') return true;
   if (user.client_project_id === projectId) return true;
   throw new Error('Forbidden: No access to this project');
@@ -210,6 +242,26 @@ export function recusaDeAssinatura(a: AutoridadeAssinatura, papel: PapelAssinatu
 const PAPEIS_NESS = new Set(['consultor', 'consultant', 'platform_admin']);
 
 /**
+ * O usuário é da equipe ness. (e não de um cliente)?
+ *
+ * Existe para que a decisão "vê a plataforma inteira" seja tomada por
+ * ALLOWLIST DE STAFF, nunca por allowlist de papel-cliente. A diferença é de
+ * direção de falha, e ela já custou caro: `users.role` é TEXT livre e
+ * `createUserSchema.role` é `z.string()`, então a lista de papéis-cliente
+ * (`org_admin`/`org_user`/`client`) nunca é exaustiva — um papel fora dela,
+ * como `ciso`, caía no ramo de plataforma e enxergava a carteira de TODOS os
+ * tenants. Invertida, a lista desconhecida cai no ramo escopado, que é o lado
+ * seguro de errar.
+ *
+ * É o mesmo conjunto que `requireResourceAccess` e `requireProjectAccess` já
+ * usam acima — deliberadamente a mesma fonte, para não haver duas definições
+ * de "staff" que possam divergir.
+ */
+export function ehEquipeNess(user: { role?: string } | undefined | null): boolean {
+  return !!user && PAPEIS_NESS.has(user.role ?? '');
+}
+
+/**
  * Guarda de papel para o pipeline comercial da ness. (lead → assessment →
  * proposta). Estes registros não pertencem a projeto nenhum: não existe
  * `project_id` para comparar, então `requireResourceAccess` não alcança essas
@@ -222,9 +274,12 @@ const PAPEIS_NESS = new Set(['consultor', 'consultant', 'platform_admin']);
  * por sonda: `GET /api/v1/proposals/:id` devolvia 200 com o `content_html` de
  * outro cliente e `DELETE` removia a linha.
  */
-export async function somenteNess(c: any, next: () => Promise<void>) {
+export async function somenteNess(
+  c: { get: (k: 'user') => AtorAutorizado | undefined; json: (b: unknown, s: 403) => Response },
+  next: () => Promise<void>
+) {
   const user = c.get('user');
-  if (!user || !PAPEIS_NESS.has(user.role)) {
+  if (!user || !PAPEIS_NESS.has(user.role ?? '')) {
     return c.json({ error: 'Forbidden: Área comercial restrita à equipe ness.' }, 403);
   }
   await next();
@@ -291,6 +346,32 @@ export async function rateLimit(kv: KVNamespace, key: string, max: number, windo
   if (current >= max) return false;
   await kv.put(k, String(current + 1), { expirationTtl: windowSec });
   return true;
+}
+
+/**
+ * Rate limit ATÔMICO de JANELA FIXA em D1. Retorna true se a ação é permitida.
+ *
+ * Existe para controles de SEGURANÇA (ex.: brute force de login por conta), onde
+ * o `rateLimit` por KV é fraco em dois pontos que o Codex apontou no #113:
+ *  - get-then-put não é atômico → sob concorrência distribuída o teto vaza;
+ *  - o TTL é renovado a cada request → a janela desliza e nunca fecha (um
+ *    usuário legítimo espaçando logins pode tomar 429 sem nunca estourar N/janela).
+ *
+ * Aqui o incremento é um upsert de statement ÚNICO (atômico no D1) e a janela é
+ * FIXA: quando `window_start + windowSec` já passou, o contador zera e a janela
+ * reinicia. Use só onde o keyspace é limitado (ex.: por conta-alvo) — não há TTL,
+ * a linha é reaproveitada na próxima chamada da mesma chave.
+ */
+export async function rateLimitD1(db: D1Database, key: string, max: number, windowSec: number): Promise<boolean> {
+  const now = Math.floor(Date.now() / 1000);
+  const row = await db.prepare(
+    `INSERT INTO rate_limits (key, count, window_start) VALUES (?1, 1, ?2)
+     ON CONFLICT(key) DO UPDATE SET
+       count = CASE WHEN rate_limits.window_start + ?3 <= ?2 THEN 1 ELSE rate_limits.count + 1 END,
+       window_start = CASE WHEN rate_limits.window_start + ?3 <= ?2 THEN ?2 ELSE rate_limits.window_start END
+     RETURNING count`
+  ).bind(key, now, windowSec).first<{ count: number }>();
+  return (row?.count ?? 1) <= max;
 }
 
 /** Envia e-mail usando a API do Resend se RESEND_API_KEY estiver presente. Caso contrário, simula em log */

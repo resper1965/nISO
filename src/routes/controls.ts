@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 import { logAudit, requireResourceAccess, verifyPassword, erro500 } from '../helpers';
-import { validateBody, controlUpdateSchema, maturitySchema, statusSchema, assinaturaSchema } from '../schemas';
-import { registrarAlteracoes, registrarDesfazer, lerTrilha } from '../trilha';
+import { validateBody, controlUpdateSchema, maturitySchema, statusSchema, assinaturaSchema, trilhaDesfazerSchema } from '../schemas';
+import { registrarAlteracoes, registrarDesfazer, lerTrilha } from '../trilha-campo';
 import { NA_STATUS, hasValidApplicability } from '../services/soa-logic';
 
 // Sub-router de controles, montado em /api/v1/controls (FORA de
@@ -57,9 +57,16 @@ controlsApp.put('/:id', async (c) => {
     // aqui: sem esta linha o UPDATE abaixo casa por id apenas e um org_admin
     // reescreve controle de outro tenant.
     await requireResourceAccess(c.env.DB, 'compliance_controls', id, c.get('user'));
+    // `maturity` tem endpoint PRÓPRIO (PUT /:id/maturity, validação 0–5). O
+    // controlUpdateSchema o descartava em silêncio: retornava 200 sem gravar
+    // (no-op enganoso). Rejeita explícito apontando o caminho certo.
+    const raw = await c.req.json().catch(() => ({} as any));
+    if (raw && raw.maturity !== undefined) {
+      return c.json({ error: 'Use PUT /api/v1/controls/:id/maturity para alterar a maturidade (0–5); não é editável por este endpoint.' }, 400);
+    }
     const v = await validateBody(c, controlUpdateSchema);
     if (!v.success) return v.response;
-    const { status, title, description } = v.data as any;
+    const { status, title, description, owner } = v.data as any;
 
     const atual = await c.env.DB.prepare(
       'SELECT project_id, status, title, description, maturity, owner FROM compliance_controls WHERE id = ?'
@@ -76,6 +83,8 @@ controlsApp.put('/:id', async (c) => {
     if (status) { updates.push('status = ?'); values.push(status); }
     if (title) { updates.push('title = ?'); values.push(title); }
     if (description !== undefined) { updates.push('description = ?'); values.push(description); }
+    // `owner` é metadado organizacional: grava sem tocar aprovações/maturity/status.
+    if (owner !== undefined) { updates.push('owner = ?'); values.push(owner); }
     if (!updates.length) return c.json({ error: 'Nothing to update' }, 400);
 
     // Controle fora do escopo não tem grau de implementação nem responsável por
@@ -319,8 +328,9 @@ controlsApp.post('/:id/trilha/desfazer', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'compliance_controls', id, c.get('user'));
-    const { operacao } = await c.req.json<{ operacao?: string }>();
-    if (!operacao) return c.json({ error: 'Informe a operação a desfazer' }, 400);
+    const v = await validateBody(c, trilhaDesfazerSchema);
+    if (!v.success) return v.response;
+    const { operacao } = v.data;
 
     // Só se desfaz operação que existe E que tocou ESTE controle: sem a segunda
     // checagem, um id de operação de outro tenant sumiria da trilha dele.
@@ -342,5 +352,43 @@ controlsApp.post('/:id/trilha/desfazer', async (c) => {
   } catch (e: any) {
     if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao registrar o desfazer', e);
+  }
+});
+
+// Colunas de sign-off por papel. Revogar limpa as quatro do papel indicado.
+export const COLUNAS_REVOGACAO: Record<'ciso' | 'ceo', string> = {
+  ciso: 'ciso_approved_by = NULL, ciso_approved_at = NULL, ciso_approved_ip = NULL, ciso_approved_ua = NULL',
+  ceo: 'ceo_approved_by = NULL, ceo_approved_at = NULL, ceo_approved_ip = NULL, ceo_approved_ua = NULL',
+};
+
+// Revogar (desaprovar) a assinatura de um controle. Ao contrário de /approve, NÃO
+// exige a senha do aprovador original nem acesso de admin: é ação do papel de
+// escrita (consultor/platform_admin, via requireResourceAccess), para corrigir
+// aprovações inválidas ou sem lastro. `reason` é obrigatório e vai para a trilha.
+// Não mexe em `status`: segue a mesma convenção do PUT /:id (invalidação por
+// mudança de texto), que também limpa o sign-off sem tocar o status.
+controlsApp.post('/:id/revoke-approval', async (c) => {
+  try {
+    const id = c.req.param('id');
+    await requireResourceAccess(c.env.DB, 'compliance_controls', id, c.get('user'));
+    const body = await c.req.json().catch(() => ({} as any));
+    const role = body?.role;
+    const reason = String(body?.reason ?? '').trim();
+    if (role !== 'ciso' && role !== 'ceo') return c.json({ error: "Campo 'role' deve ser 'ciso' ou 'ceo'" }, 400);
+    if (!reason) return c.json({ error: "Campo 'reason' é obrigatório para revogar uma aprovação" }, 400);
+
+    const atual = await c.env.DB.prepare('SELECT project_id FROM compliance_controls WHERE id = ?').bind(id).first() as any;
+    if (!atual) return c.json({ error: 'Controle não encontrado' }, 404);
+
+    await c.env.DB.prepare(
+      `UPDATE compliance_controls SET ${COLUNAS_REVOGACAO[role as 'ciso' | 'ceo']}, updated_at = datetime('now') WHERE id = ?`
+    ).bind(id).run();
+
+    const ator = c.get('user')?.email ?? 'system';
+    await logAudit(c.env.DB, 'control.approval_revoked', ator, `Aprovação ${String(role).toUpperCase()} do controle ${id} revogada. Motivo: ${reason}`, reason, '', atual.project_id);
+    return c.json({ ok: true, revoked: true, role });
+  } catch (e: any) {
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
+    return erro500(c, 'Falha ao revogar aprovação', e);
   }
 });

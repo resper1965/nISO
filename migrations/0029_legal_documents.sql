@@ -1,4 +1,4 @@
--- Migration 0024: documentos legais do n.iso versionados, com classificação, e
+-- Migration 0029: documentos legais do n.iso versionados, com classificação, e
 -- o registro de aceite de cada usuário.
 --
 -- A `classification` é CAMPO DO DOCUMENTO, não julgamento de quem publica: é

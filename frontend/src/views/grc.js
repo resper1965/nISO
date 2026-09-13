@@ -1,14 +1,25 @@
 import { S } from '../state.js';
 import { api } from '../api.js';
-import { showToast, openModal, closeModal, escapeHTML } from '../ui.js';
+import { showToast, openModal, closeModal, escapeHTML, traduzStatus } from '../ui.js';
 import { navigate } from '../router.js';
+
+// S2: wrappers para handlers COMPOSTOS/inline (a delegação chama uma função só).
+window.__grcDeleteRisk = function (riskId) {
+    if (confirm('Excluir este risco?')) {
+        api('DELETE', `/api/v1/risks/${riskId}`).then(() => { window.forceCloseModal(); window.render(); });
+    }
+};
+window.__grcCloseExecAudit = function (id) {
+    window.forceCloseModal();
+    navigate('audit-execution', { activeAuditId: id });
+};
 
     async function renderRisks(c, h, a) {
         h.textContent = 'Riscos';
         const proj = S.activeProject || S.projects[0];
-        if (!proj) { c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto primeiro.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; return; }
+        if (!proj) { c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto primeiro.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; return; }
         const isOrgUser = S.user && S.user.role === 'org_user';
-        a.innerHTML = isOrgUser ? '' : `<button class="btn btn-primary" onclick="openNewRiskModal('${proj.id}')">+ Novo Risco</button>`;
+        a.innerHTML = isOrgUser ? '' : `<button class="btn btn-primary" data-action="openNewRiskModal" data-args='["${proj.id}"]'>+ Novo Risco</button>`;
         
         let risks = [];
         try { risks = await api('GET', `/api/v1/projects/${proj.id}/risks`); } catch(e) {}
@@ -74,7 +85,7 @@ import { navigate } from '../router.js';
                 cellsHTML += `
                     <div class="matrix-cell ${isSelected ? 'selected' : ''}" 
                          style="background: ${colors.bg}; border: 1px solid ${isSelected ? 'var(--accent)' : colors.border};" 
-                         onclick="toggleRiskFilter(${p}, ${i})"
+                         data-action="toggleRiskFilter" data-args='[${p},${i}]'
                          title="Probabilidade: ${p}, Impacto: ${i} (${count} risco${count !== 1 ? 's' : ''})">
                         ${count > 0 ? `<span class="cell-counter">${count}</span>` : ''}
                     </div>
@@ -90,7 +101,7 @@ import { navigate } from '../router.js';
             filterIndicatorBar = `
                 <div class="filter-indicator-bar" style="display:flex; justify-content:space-between; align-items:center; background:rgba(0, 173, 232, 0.1); border: 1px solid rgba(0, 173, 232, 0.2); border-radius:8px; padding:0.5rem 1rem; margin-bottom:1.5rem; font-size:0.8rem; animation: fadeIn 0.2s ease-out;">
                     <span>Filtrando riscos com <strong>Impacto ${S.riskFilter.impact}</strong> e <strong>Probabilidade ${S.riskFilter.probability}</strong> (${filteredRisks.length} encontrado${filteredRisks.length !== 1 ? 's' : ''})</span>
-                    <button class="btn btn-ghost" onclick="toggleRiskFilter(${S.riskFilter.probability}, ${S.riskFilter.impact})" style="padding:0.25rem 0.5rem; font-size:0.75rem; color:var(--accent);">Limpar Filtro</button>
+                    <button class="btn btn-ghost" data-action="toggleRiskFilter" data-args='[${S.riskFilter.probability},${S.riskFilter.impact}]' style="padding:0.25rem 0.5rem; font-size:0.75rem; color:var(--accent);">Limpar Filtro</button>
                 </div>
             `;
         }
@@ -190,24 +201,24 @@ import { navigate } from '../router.js';
                 <!-- List Section -->
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; margin-top: 1rem;">
                     <div class="card-label" style="margin-bottom: 0;">Lista Detalhada de Riscos</div>
-                    <button class="btn" onclick="exportCSV('risks')" style="font-size:0.7rem; padding:0.4rem 0.8rem">Exportar Riscos</button>
+                    <button class="btn" data-action="exportCSV" data-args='["risks"]' style="font-size:0.7rem; padding:0.4rem 0.8rem">Exportar Riscos</button>
                 </div>
                 
                 <div>
                     ${filteredRisks.length ? filteredRisks.map(r => `
-                        <div class="list-item" style="cursor:pointer" onclick="window.openRiskDetailsModal('${r.id}')">
+                        <div class="list-item" style="cursor:pointer" data-action="openRiskDetailsModal" data-args='["${r.id}"]'>
                             <div style="flex:1">
                                 <div class="item-name">${escapeHTML(r.asset)} — ${escapeHTML(r.threat)}</div>
                                 <div class="item-meta" style="margin-top:0.25rem">
                                     <strong>Probabilidade:</strong> ${r.probability} | <strong>Impacto:</strong> ${r.impact} | 
-                                    <strong>Tratamento:</strong> ${r.treatment} | <strong>Responsável:</strong> ${escapeHTML(r.owner || 'Sem dono')}
+                                    <strong>Tratamento:</strong> ${escapeHTML(traduzStatus(r.treatment) || 'Não definido')} | <strong>Responsável:</strong> ${escapeHTML(r.owner || 'Sem dono')}
                                     ${r.control_standard ? ` | <strong>Controle:</strong> <span class="badge badge-implemented" style="padding:2px 6px;font-size:0.75rem">${escapeHTML(r.control_standard)}</span>` : ''}
                                     ${r.treatment === 'Accept' && r.accepted_by ? ` | <strong>Aceito por:</strong> ${escapeHTML(r.accepted_by)}` : ''}
                                 </div>
                             </div>
                             <div style="display:flex;align-items:center;gap:0.5rem">
                                 <span style="font-weight:600;color:${levelColor(r.risk_level)}">${r.risk_score || (r.impact * r.probability)}</span>
-                                <span class="ctx-tag" style="background:${levelColor(r.risk_level)}20;color:${levelColor(r.risk_level)}">${r.risk_level || 'N/A'}</span>
+                                <span class="ctx-tag" style="background:${levelColor(r.risk_level)}20;color:${levelColor(r.risk_level)}">${escapeHTML(traduzStatus(r.risk_level) || 'Sem nível')}</span>
                             </div>
                         </div>
                     `).join('') : '<div class="empty-state"><h3>Nenhum risco correspondente</h3><p>Não há riscos cadastrados ou que correspondam ao filtro selecionado.</p></div>'}
@@ -265,10 +276,10 @@ import { navigate } from '../router.js';
             .join('');
 
         openModal(`
-            <div class="modal-header"><span class="modal-title">Novo Risco</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Novo Risco</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group">
                 <label class="form-label">Ativo do Inventario (Opcional)</label>
-                <select class="form-input" id="risk-asset-select" onchange="window.onRiskAssetSelectChange(this)">
+                <select class="form-input" id="risk-asset-select" data-action-change="onRiskAssetSelectChange" data-arg-el>
                     <option value="">-- Escolha um ativo --</option>
                     ${assets.map(a => `<option value="${a.id}" data-name="${escapeHTML(a.name)}">${escapeHTML(a.name)} (${a.category})</option>`).join('')}
                     <option value="__manual__">-- Digitar manualmente --</option>
@@ -286,7 +297,7 @@ import { navigate } from '../router.js';
             </div>
             <div class="form-group">
                 <label class="form-label">Tratamento</label>
-                <select class="form-input" id="risk-treatment" onchange="window.onRiskTreatmentChange(this)">
+                <select class="form-input" id="risk-treatment" data-action-change="onRiskTreatmentChange" data-arg-el>
                     <option value="Mitigate">Mitigar</option>
                     <option value="Accept">Aceitar</option>
                     <option value="Transfer">Transferir</option>
@@ -306,7 +317,7 @@ import { navigate } from '../router.js';
             </div>
             <div class="form-group"><label class="form-label">Responsável</label><input class="form-input" id="risk-owner" placeholder="Ex: CISO"></div>
             <div class="form-group"><label class="form-label">Plano de Tratamento</label><textarea class="form-input" id="risk-plan" rows="2" placeholder="Descreva as acoes..."></textarea></div>
-            <button class="btn btn-primary" style="width:100%" onclick="window.createRisk('${projectId}')">Registrar Risco</button>
+            <button class="btn btn-primary" style="width:100%" data-action="createRisk" data-args='["${projectId}"]'>Registrar Risco</button>
         `);
     };
 
@@ -350,7 +361,7 @@ import { navigate } from '../router.js';
             .join('');
 
         openModal(`
-            <div class="modal-header"><span class="modal-title">Editar Risco</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Editar Risco</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Ativo</label><input class="form-input" id="risk-e-asset" value="${escapeHTML(r.asset||'')}"></div>
             <div class="form-group"><label class="form-label">Ameaca</label><input class="form-input" id="risk-e-threat" value="${escapeHTML(r.threat||'')}"></div>
             <div class="form-group"><label class="form-label">Vulnerabilidade</label><input class="form-input" id="risk-e-vuln" value="${escapeHTML(r.vulnerability||'')}"></div>
@@ -369,8 +380,8 @@ import { navigate } from '../router.js';
             </div>
             <div class="form-group"><label class="form-label">Responsável</label><input class="form-input" id="risk-e-owner" value="${escapeHTML(r.owner||'')}"></div>
             <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:1rem">
-                <button class="btn" style="color:var(--danger)" onclick="if(confirm('Excluir este risco?')){api('DELETE','/api/v1/risks/${riskId}').then(()=>{forceCloseModal();render()})}">Excluir</button>
-                <button class="btn btn-primary" onclick="window.updateRisk('${riskId}')">Salvar</button>
+                <button class="btn" style="color:var(--danger)" data-action="__grcDeleteRisk" data-args='["${riskId}"]'>Excluir</button>
+                <button class="btn btn-primary" data-action="updateRisk" data-args='["${riskId}"]'>Salvar</button>
             </div>
         `);
     };
@@ -400,7 +411,7 @@ import { navigate } from '../router.js';
         openModal(`
             <div class="modal-header">
                 <span class="modal-title">Detalhes do Risco</span>
-                <button class="btn-ghost" onclick="forceCloseModal()">&times;</button>
+                <button class="btn-ghost" data-action="forceCloseModal">&times;</button>
             </div>
             <div style="display:flex; flex-direction:column; gap:16px; font-family:'Inter',sans-serif;">
                 <div style="font-family:'Montserrat',sans-serif; font-weight:700; font-size:1.3rem; color:var(--accent)">
@@ -410,7 +421,7 @@ import { navigate } from '../router.js';
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; background:rgba(255,255,255,0.02); border:1px solid var(--border); border-radius:12px; padding:16px">
                     <div>
                         <div style="font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:500; margin-bottom:4px">Nível de Risco</div>
-                        <span class="ctx-tag" style="background:${levelColor(r.risk_level)}20; color:${levelColor(r.risk_level)}; font-weight:600">${r.risk_level || 'N/A'}</span>
+                        <span class="ctx-tag" style="background:${levelColor(r.risk_level)}20; color:${levelColor(r.risk_level)}; font-weight:600">${escapeHTML(traduzStatus(r.risk_level) || 'Sem nível')}</span>
                     </div>
                     <div>
                         <div style="font-size:0.75rem; color:var(--text-dim); text-transform:uppercase; font-weight:500; margin-bottom:4px">Score Total</div>
@@ -447,8 +458,8 @@ import { navigate } from '../router.js';
                 </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px">
-                <button class="btn" onclick="forceCloseModal()">Fechar</button>
-                ${canCrud ? `<button class="btn btn-primary" onclick="window.openEditRiskModal('${id}')">Editar Risco</button>` : ''}
+                <button class="btn" data-action="forceCloseModal">Fechar</button>
+                ${canCrud ? `<button class="btn btn-primary" data-action="openEditRiskModal" data-args='["${id}"]'>Editar Risco</button>` : ''}
             </div>
         `);
     };
@@ -458,12 +469,12 @@ import { navigate } from '../router.js';
         const proj = S.activeProject || S.projects[0];
         if (!proj) { 
             a.innerHTML = '';
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
             return; 
         }
         
         const canCrud = S.user && (S.user.role === 'platform_admin' || S.user.role === 'consultant' || S.user.role === 'consultor');
-        a.innerHTML = canCrud ? `<button class="btn btn-primary" onclick="window.openNewVendorModal('${proj.id}')">+ Novo Fornecedor</button>` : '';
+        a.innerHTML = canCrud ? `<button class="btn btn-primary" data-action="openNewVendorModal" data-args='["${proj.id}"]'>+ Novo Fornecedor</button>` : '';
 
         let vendors = [];
         try { 
@@ -502,7 +513,7 @@ import { navigate } from '../router.js';
                     v.dpa_signed ? window.renderStatusBadge('Sim', 'success') : window.renderStatusBadge('Não', 'danger'),
                     `<span style="font-size:0.75rem;color:var(--text-dim)">${escapeHTML(certStr)}</span>`,
                     window.renderStatusBadge(v.diligence_level || 'Low', v.diligence_level === 'High' ? 'danger' : 'info'),
-                    `<button class="btn btn-ghost btn-sm" onclick="window.openVendorDetailsModal('${v.id}')">Detalhes</button>`
+                    `<button class="btn btn-ghost btn-sm" data-action="openVendorDetailsModal" data-args='["${v.id}"]'>Detalhes</button>`
                 ];
             }),
             { emptyState: 'Nenhum fornecedor registrado neste projeto.' }
@@ -523,7 +534,7 @@ import { navigate } from '../router.js';
         openModal(`
             <div class="modal-header">
                 <span class="modal-title">Detalhes do Fornecedor</span>
-                <button class="btn-ghost" onclick="forceCloseModal()">&times;</button>
+                <button class="btn-ghost" data-action="forceCloseModal">&times;</button>
             </div>
             <div style="display:flex; flex-direction:column; gap:16px; font-family:'Inter',sans-serif;">
                 <div style="font-family:'Montserrat',sans-serif; font-weight:700; font-size:1.4rem; color:var(--accent)">
@@ -584,8 +595,8 @@ import { navigate } from '../router.js';
                 </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px">
-                <button class="btn" onclick="forceCloseModal()">Fechar</button>
-                ${canCrud ? `<button class="btn btn-primary" onclick="window.openEditVendorModal('${id}')">Editar Fornecedor</button>` : ''}
+                <button class="btn" data-action="forceCloseModal">Fechar</button>
+                ${canCrud ? `<button class="btn btn-primary" data-action="openEditVendorModal" data-args='["${id}"]'>Editar Fornecedor</button>` : ''}
             </div>
         `);
     };
@@ -613,15 +624,15 @@ import { navigate } from '../router.js';
 
     window.openNewVendorModal = function(projectId) {
         openModal(`
-            <div class="modal-header"><span class="modal-title">Novo Fornecedor</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Novo Fornecedor</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="vnd-name" placeholder="Ex: AWS, Cloudflare"></div>
             <div class="form-group"><label class="form-label">Categoria</label><input class="form-input" id="vnd-cat" placeholder="Ex: Cloud, SaaS, Consultoria"></div>
             
             <div class="card-label" style="margin-top:1rem; margin-bottom:0.5rem">Certificacoes Conhecidas</div>
             <div style="display:flex; gap:1rem; margin-bottom:1rem">
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-iso27001" onchange="window.previewVendorScore()"> ISO 27001</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-iso27701" onchange="window.previewVendorScore()"> ISO 27701</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-soc2" onchange="window.previewVendorScore()"> SOC 2</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-iso27001" data-action-change="previewVendorScore"> ISO 27001</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-iso27701" data-action-change="previewVendorScore"> ISO 27701</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-soc2" data-action-change="previewVendorScore"> SOC 2</label>
             </div>
             
             <div class="form-group">
@@ -631,29 +642,29 @@ import { navigate } from '../router.js';
 
             <div class="card-label" style="margin-top:1rem; margin-bottom:0.5rem">Postura de Seguranca (Se houver questionario/dados)</div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-bottom:1rem">
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-mfa" onchange="window.previewVendorScore()"> MFA Habilitado</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-enc" onchange="window.previewVendorScore()"> Criptografia Ativa</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-bkp" onchange="window.previewVendorScore()"> Backups Regulares</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-inc" onchange="window.previewVendorScore()"> Plano de Incidentes</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem; grid-column:span 2"><input type="checkbox" id="vnd-pen" onchange="window.previewVendorScore()"> Testes de Invasao (Pentest)</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-mfa" data-action-change="previewVendorScore"> MFA Habilitado</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-enc" data-action-change="previewVendorScore"> Criptografia Ativa</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-bkp" data-action-change="previewVendorScore"> Backups Regulares</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-inc" data-action-change="previewVendorScore"> Plano de Incidentes</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem; grid-column:span 2"><input type="checkbox" id="vnd-pen" data-action-change="previewVendorScore"> Testes de Invasao (Pentest)</label>
             </div>
 
             <div class="card-label" style="margin-top:1rem; margin-bottom:0.5rem">Canais Publicos (Trust Center / DPA Padrao)</div>
             <div class="form-group">
                 <label class="form-label">Trust Center / Security Portal (URL)</label>
-                <input class="form-input" id="vnd-tc-url" placeholder="Ex: https://aws.amazon.com/compliance/" oninput="window.previewVendorScore()">
+                <input class="form-input" id="vnd-tc-url" placeholder="Ex: https://aws.amazon.com/compliance/" data-action-input="previewVendorScore">
             </div>
             <div style="display:flex; gap:0.5rem">
                 <div class="form-group" style="flex:1">
                     <label class="form-label">DPA Assinado?</label>
-                    <select class="form-input" id="vnd-dpa" onchange="window.previewVendorScore()">
+                    <select class="form-input" id="vnd-dpa" data-action-change="previewVendorScore">
                         <option value="0">Nao</option>
                         <option value="1">Sim</option>
                     </select>
                 </div>
                 <div class="form-group" style="flex:2">
                     <label class="form-label">DPA URL (Padrao do Site)</label>
-                    <input class="form-input" id="vnd-dpa-url" placeholder="Ex: https://aws.amazon.com/dpa/" oninput="window.previewVendorScore()">
+                    <input class="form-input" id="vnd-dpa-url" placeholder="Ex: https://aws.amazon.com/dpa/" data-action-input="previewVendorScore">
                 </div>
             </div>
 
@@ -662,7 +673,7 @@ import { navigate } from '../router.js';
                 <span id="vnd-score-preview" style="font-size:1.1rem; font-weight:700; color:var(--danger)">0 / 100</span>
             </div>
 
-            <button class="btn btn-primary" style="width:100%" onclick="window.createVendor('${projectId}')">Registrar Fornecedor</button>
+            <button class="btn btn-primary" style="width:100%" data-action="createVendor" data-args='["${projectId}"]'>Registrar Fornecedor</button>
         `);
         window.previewVendorScore();
     };
@@ -693,15 +704,15 @@ import { navigate } from '../router.js';
         const v = S.vendors.find(x => x.id === id) || {};
         const projectId = S.activeProject ? S.activeProject.id : '';
         openModal(`
-            <div class="modal-header"><span class="modal-title">Editar Fornecedor</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Editar Fornecedor</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="vnd-e-name" value="${escapeHTML(v.name||'')}"></div>
             <div class="form-group"><label class="form-label">Categoria</label><input class="form-input" id="vnd-e-cat" value="${escapeHTML(v.category||'')}"></div>
             
             <div class="card-label" style="margin-top:1rem; margin-bottom:0.5rem">Certificacoes Conhecidas</div>
             <div style="display:flex; gap:1rem; margin-bottom:1rem">
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-iso27001" ${v.has_iso27001?'checked':''} onchange="window.previewVendorScore()"> ISO 27001</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-iso27701" ${v.has_iso27701?'checked':''} onchange="window.previewVendorScore()"> ISO 27701</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-soc2" ${v.has_soc2?'checked':''} onchange="window.previewVendorScore()"> SOC 2</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-iso27001" ${v.has_iso27001?'checked':''} data-action-change="previewVendorScore"> ISO 27001</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-iso27701" ${v.has_iso27701?'checked':''} data-action-change="previewVendorScore"> ISO 27701</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-soc2" ${v.has_soc2?'checked':''} data-action-change="previewVendorScore"> SOC 2</label>
             </div>
             
             <div class="form-group">
@@ -711,29 +722,29 @@ import { navigate } from '../router.js';
 
             <div class="card-label" style="margin-top:1rem; margin-bottom:0.5rem">Postura de Seguranca</div>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-bottom:1rem">
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-mfa" ${v.has_mfa?'checked':''} onchange="window.previewVendorScore()"> MFA Habilitado</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-enc" ${v.has_encryption?'checked':''} onchange="window.previewVendorScore()"> Criptografia Ativa</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-bkp" ${v.has_backup?'checked':''} onchange="window.previewVendorScore()"> Backups Regulares</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-inc" ${v.has_incident_plan?'checked':''} onchange="window.previewVendorScore()"> Plano de Incidentes</label>
-                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem; grid-column:span 2"><input type="checkbox" id="vnd-pen" ${v.has_pentest?'checked':''} onchange="window.previewVendorScore()"> Testes de Invasao (Pentest)</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-mfa" ${v.has_mfa?'checked':''} data-action-change="previewVendorScore"> MFA Habilitado</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-enc" ${v.has_encryption?'checked':''} data-action-change="previewVendorScore"> Criptografia Ativa</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-bkp" ${v.has_backup?'checked':''} data-action-change="previewVendorScore"> Backups Regulares</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem"><input type="checkbox" id="vnd-inc" ${v.has_incident_plan?'checked':''} data-action-change="previewVendorScore"> Plano de Incidentes</label>
+                <label style="font-size:0.7rem; color:var(--muted); display:flex; align-items:center; gap:0.25rem; grid-column:span 2"><input type="checkbox" id="vnd-pen" ${v.has_pentest?'checked':''} data-action-change="previewVendorScore"> Testes de Invasao (Pentest)</label>
             </div>
 
             <div class="card-label" style="margin-top:1rem; margin-bottom:0.5rem">Canais Publicos</div>
             <div class="form-group">
                 <label class="form-label">Trust Center / Security Portal (URL)</label>
-                <input class="form-input" id="vnd-tc-url" value="${escapeHTML(v.trust_center_url||'')}" placeholder="Ex: https://aws.amazon.com/compliance/" oninput="window.previewVendorScore()">
+                <input class="form-input" id="vnd-tc-url" value="${escapeHTML(v.trust_center_url||'')}" placeholder="Ex: https://aws.amazon.com/compliance/" data-action-input="previewVendorScore">
             </div>
             <div style="display:flex; gap:0.5rem">
                 <div class="form-group" style="flex:1">
                     <label class="form-label">DPA Assinado?</label>
-                    <select class="form-input" id="vnd-dpa" onchange="window.previewVendorScore()">
+                    <select class="form-input" id="vnd-dpa" data-action-change="previewVendorScore">
                         <option value="0" ${!v.dpa_signed?'selected':''}>Nao</option>
                         <option value="1" ${v.dpa_signed?'selected':''}>Sim</option>
                     </select>
                 </div>
                 <div class="form-group" style="flex:2">
                     <label class="form-label">DPA URL</label>
-                    <input class="form-input" id="vnd-dpa-url" value="${escapeHTML(v.dpa_url||'')}" placeholder="Ex: https://aws.amazon.com/dpa/" oninput="window.previewVendorScore()">
+                    <input class="form-input" id="vnd-dpa-url" value="${escapeHTML(v.dpa_url||'')}" placeholder="Ex: https://aws.amazon.com/dpa/" data-action-input="previewVendorScore">
                 </div>
             </div>
 
@@ -743,8 +754,8 @@ import { navigate } from '../router.js';
             </div>
 
             <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:1.5rem">
-                <button class="btn" style="color:var(--danger)" onclick="window.deleteVendor('${id}')">Excluir</button>
-                <button class="btn btn-primary" onclick="window.updateVendor('${id}')">Salvar</button>
+                <button class="btn" style="color:var(--danger)" data-action="deleteVendor" data-args='["${id}"]'>Excluir</button>
+                <button class="btn btn-primary" data-action="updateVendor" data-args='["${id}"]'>Salvar</button>
             </div>
         `);
         window.previewVendorScore = function() {
@@ -800,13 +811,13 @@ import { navigate } from '../router.js';
         const proj = S.activeProject || S.projects[0];
         if (!proj) { 
             a.innerHTML = '';
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
             return; 
         }
         
         const canCrud = S.user && (S.user.role === 'platform_admin' || S.user.role === 'consultant' || S.user.role === 'consultor');
-        a.innerHTML = (canCrud ? `<button class="btn btn-primary" onclick="window.openNewTrainingModal('${proj.id}')">+ Novo Registro</button> ` : '') +
-            `<button class="btn btn-ghost" onclick="window.openImportTrainingModal('${proj.id}')">Importar JSON</button>`;
+        a.innerHTML = (canCrud ? `<button class="btn btn-primary" data-action="openNewTrainingModal" data-args='["${proj.id}"]'>+ Novo Registro</button> ` : '') +
+            `<button class="btn btn-ghost" data-action="openImportTrainingModal" data-args='["${proj.id}"]'>Importar JSON</button>`;
 
         let records = [];
         let summary = {};
@@ -842,7 +853,7 @@ import { navigate } from '../router.js';
                     r.completion_date || '—',
                     hasEvidence ? '<span style="color:var(--success)"> Anexada</span>' : '<span style="color:var(--text-dim)"> Ausente</span>',
                     window.renderStatusBadge(r.status || 'Pending', statusType),
-                    `<button class="btn btn-ghost btn-sm" onclick="window.openTrainingDetailsModal('${r.id}')">Detalhes</button>`
+                    `<button class="btn btn-ghost btn-sm" data-action="openTrainingDetailsModal" data-args='["${r.id}"]'>Detalhes</button>`
                 ];
             }),
             { emptyState: 'Nenhum registro de treinamento cadastrado para este projeto.' }
@@ -867,7 +878,7 @@ import { navigate } from '../router.js';
                 evidenceHtml = `
                     <div style="display:flex; align-items:center; gap:8px">
                         <span style="font-size:0.85rem; font-weight:600; color:var(--text)">${escapeHTML(evName)}</span>
-                        <button class="btn btn-primary" onclick="window.downloadEvidenceFile('${evId}')" style="padding:4px 8px; font-size:0.7rem">Download</button>
+                        <button class="btn btn-primary" data-action="downloadEvidenceFile" data-args='["${evId}"]' style="padding:4px 8px; font-size:0.7rem">Download</button>
                     </div>`;
             } else if (r.evidence_file.startsWith('http')) {
                 evidenceHtml = `<a href="${escapeHTML(r.evidence_file)}" target="_blank" class="btn" style="padding:4px 8px; font-size:0.7rem; display:inline-block; border-color:var(--accent); color:var(--accent)">Abrir Link</a>`;
@@ -879,7 +890,7 @@ import { navigate } from '../router.js';
         openModal(`
             <div class="modal-header">
                 <span class="modal-title">Detalhes do Treinamento</span>
-                <button class="btn-ghost" onclick="forceCloseModal()">&times;</button>
+                <button class="btn-ghost" data-action="forceCloseModal">&times;</button>
             </div>
             <div style="display:flex; flex-direction:column; gap:16px; font-family:'Inter',sans-serif;">
                 <div style="font-family:'Montserrat',sans-serif; font-weight:700; font-size:1.3rem; color:var(--accent)">
@@ -910,8 +921,8 @@ import { navigate } from '../router.js';
                 </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px">
-                <button class="btn" onclick="forceCloseModal()">Fechar</button>
-                ${canCrud ? `<button class="btn btn-primary" onclick="window.openEditTrainingModal('${id}')">Editar Registro</button>` : ''}
+                <button class="btn" data-action="forceCloseModal">Fechar</button>
+                ${canCrud ? `<button class="btn btn-primary" data-action="openEditTrainingModal" data-args='["${id}"]'>Editar Registro</button>` : ''}
             </div>
         `);
     };
@@ -951,7 +962,7 @@ import { navigate } from '../router.js';
 
     window.openNewTrainingModal = function(projectId) {
         openModal(`
-            <div class="modal-header"><span class="modal-title">Novo Registro de Treinamento</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Novo Registro de Treinamento</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Nome do Colaborador</label><input class="form-input" id="tr-name" placeholder="Ex: Ana Silva"></div>
             <div class="form-group"><label class="form-label">Treinamento</label><input class="form-input" id="tr-training" placeholder="Ex: Seguranca da Informacao Básico"></div>
             <div style="display:flex;gap:0.5rem">
@@ -966,12 +977,12 @@ import { navigate } from '../router.js';
                     <input class="form-input" id="tr-evidence" style="flex:1" placeholder="Ex: Link do certificado ou upload de arquivo">
                     <label class="btn" style="padding:0.6rem 1rem; margin:0; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; justify-content:center; white-space:nowrap">
                         Upload
-                        <input type="file" style="display:none" onchange="window.uploadTrainingEvidence(this, '${projectId}')">
+                        <input type="file" style="display:none" data-action-change="uploadTrainingEvidence" data-args='["${projectId}"]' data-arg-el>
                     </label>
                 </div>
                 <div id="tr-upload-status" style="font-size:0.7rem; color:var(--text-dim); margin-top:4px; display:none"></div>
             </div>
-            <button class="btn btn-primary" style="width:100%" onclick="window.createTraining('${projectId}')">Registrar</button>
+            <button class="btn btn-primary" style="width:100%" data-action="createTraining" data-args='["${projectId}"]'>Registrar</button>
         `);
     };
 
@@ -993,7 +1004,7 @@ import { navigate } from '../router.js';
         const r = S.training.find(x => x.id === id) || {};
         const projectId = S.activeProject ? S.activeProject.id : '';
         openModal(`
-            <div class="modal-header"><span class="modal-title">Editar Treinamento</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Editar Treinamento</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Colaborador</label><input class="form-input" id="tr-e-name" value="${escapeHTML(r.employee_name||'')}"></div>
             <div class="form-group"><label class="form-label">Treinamento</label><input class="form-input" id="tr-e-training" value="${escapeHTML(r.training_name||'')}"></div>
             <div style="display:flex;gap:0.5rem">
@@ -1008,14 +1019,14 @@ import { navigate } from '../router.js';
                     <input class="form-input" id="tr-e-evidence" style="flex:1" placeholder="Ex: Link do certificado ou upload de arquivo" value="${escapeHTML(r.evidence_file||'')}">
                     <label class="btn" style="padding:0.6rem 1rem; margin:0; cursor:pointer; font-size:0.8rem; display:flex; align-items:center; justify-content:center; white-space:nowrap">
                         Upload
-                        <input type="file" style="display:none" onchange="window.uploadTrainingEvidence(this, '${projectId}')">
+                        <input type="file" style="display:none" data-action-change="uploadTrainingEvidence" data-args='["${projectId}"]' data-arg-el>
                     </label>
                 </div>
                 <div id="tr-upload-status" style="font-size:0.7rem; color:var(--text-dim); margin-top:4px; display:none"></div>
             </div>
             <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:1rem">
-                <button class="btn" style="color:var(--danger)" onclick="window.deleteTraining('${id}')">Excluir</button>
-                <button class="btn btn-primary" onclick="window.updateTraining('${id}')">Salvar</button>
+                <button class="btn" style="color:var(--danger)" data-action="deleteTraining" data-args='["${id}"]'>Excluir</button>
+                <button class="btn btn-primary" data-action="updateTraining" data-args='["${id}"]'>Salvar</button>
             </div>
         `);
     };
@@ -1039,7 +1050,7 @@ import { navigate } from '../router.js';
 
     window.openImportTrainingModal = function(projectId) {
         openModal(`
-            <div class="modal-header"><span class="modal-title">Importar Treinamentos via JSON</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Importar Treinamentos via JSON</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <p style="font-size:0.75rem;color:var(--muted);margin-bottom:1rem">
                 Cole o payload JSON de cobertura de treinamento gerado pelo seu sistema externo para realizar a importação em lote de dados.
             </p>
@@ -1059,9 +1070,9 @@ import { navigate } from '../router.js';
             </div>
             <div class="form-group">
                 <label class="form-label">Endpoint de Integração do Webhook</label>
-                <input class="form-input" style="font-family:monospace;font-size:0.65rem;background:rgba(255,255,255,0.02)" readonly value="${window.location.origin}/api/v1/projects/${projectId}/training/import-external">
+                <input class="form-input" style="font-family:monospace;font-size:0.75rem;background:rgba(255,255,255,0.02)" readonly value="${window.location.origin}/api/v1/projects/${projectId}/training/import-external">
             </div>
-            <button class="btn btn-primary" id="btn-import-training" style="width:100%" onclick="doImportTraining('${projectId}')">Confirmar Importação</button>
+            <button class="btn btn-primary" id="btn-import-training" style="width:100%" data-action="doImportTraining" data-args='["${projectId}"]'>Confirmar Importação</button>
         `);
     };
 
@@ -1106,12 +1117,12 @@ import { navigate } from '../router.js';
         const proj = S.activeProject || S.projects[0];
         if (!proj) { 
             a.innerHTML = '';
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
             return; 
         }
         
         const canCrud = S.user && (S.user.role === 'platform_admin' || S.user.role === 'consultant' || S.user.role === 'consultor');
-        a.innerHTML = canCrud ? `<button class="btn btn-primary" onclick="window.openNewCAPAModal('${proj.id}')">+ Nova Ação</button>` : '';
+        a.innerHTML = canCrud ? `<button class="btn btn-primary" data-action="openNewCAPAModal" data-args='["${proj.id}"]'>+ Nova Ação</button>` : '';
 
         let items = [];
         try { 
@@ -1144,7 +1155,7 @@ import { navigate } from '../router.js';
                     ca.due_date || '—',
                     window.renderStatusBadge(ca.severity || 'Medium', sevBadgeType),
                     window.renderStatusBadge(ca.status || 'Open', statusBadgeType),
-                    `<button class="btn btn-ghost btn-sm" onclick="window.openCAPADetailsModal('${ca.id}')">Detalhes</button>`
+                    `<button class="btn btn-ghost btn-sm" data-action="openCAPADetailsModal" data-args='["${ca.id}"]'>Detalhes</button>`
                 ];
             }),
             { emptyState: 'Nenhuma ação corretiva registrada para este projeto.' }
@@ -1181,7 +1192,7 @@ import { navigate } from '../router.js';
         openModal(`
             <div class="modal-header">
                 <span class="modal-title">Detalhes da Acao Corretiva</span>
-                <button class="btn-ghost" onclick="forceCloseModal()">&times;</button>
+                <button class="btn-ghost" data-action="forceCloseModal">&times;</button>
             </div>
             <div style="display:flex; flex-direction:column; gap:16px; font-family:'Inter',sans-serif;">
                 <div style="font-family:'Montserrat',sans-serif; font-weight:700; font-size:1.3rem; color:var(--accent)">
@@ -1228,8 +1239,8 @@ import { navigate } from '../router.js';
                 </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px">
-                <button class="btn" onclick="forceCloseModal()">Fechar</button>
-                ${canCrud ? `<button class="btn btn-primary" onclick="window.openEditCAPAModal('${id}')">Editar Acao</button>` : ''}
+                <button class="btn" data-action="forceCloseModal">Fechar</button>
+                ${canCrud ? `<button class="btn btn-primary" data-action="openEditCAPAModal" data-args='["${id}"]'>Editar Acao</button>` : ''}
             </div>
         `);
     };
@@ -1242,7 +1253,7 @@ import { navigate } from '../router.js';
         const projectControls = S.controls.filter(ctrl => ctrl.project_id === projectId);
 
         openModal(`
-            <div class="modal-header"><span class="modal-title">Nova Acao Corretiva</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Nova Acao Corretiva</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Título</label><input class="form-input" id="capa-title" placeholder="Ex: Implementar MFA em todos os sistemas"></div>
             <div class="form-group"><label class="form-label">Descrição</label><textarea class="form-input" id="capa-desc" placeholder="Detalhe a acao corretiva..."></textarea></div>
             <div class="form-group"><label class="form-label">Causa Raiz (Root Cause)</label><textarea class="form-input" id="capa-root" placeholder="Causa identificada do problema..."></textarea></div>
@@ -1277,7 +1288,7 @@ import { navigate } from '../router.js';
                 </select>
             </div>
             
-            <button class="btn btn-primary" style="width:100%;margin-top:1rem" onclick="window.createCAPA('${projectId}')">Registrar</button>
+            <button class="btn btn-primary" style="width:100%;margin-top:1rem" data-action="createCAPA" data-args='["${projectId}"]'>Registrar</button>
         `);
     };
 
@@ -1309,7 +1320,7 @@ import { navigate } from '../router.js';
         const projectControls = S.controls.filter(ctrl => ctrl.project_id === projectId);
 
         openModal(`
-            <div class="modal-header"><span class="modal-title">Editar Acao Corretiva</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Editar Acao Corretiva</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Título</label><input class="form-input" id="capa-e-title" value="${escapeHTML(ca.title||'')}"></div>
             <div class="form-group"><label class="form-label">Descrição</label><textarea class="form-input" id="capa-e-desc">${escapeHTML(ca.description||'')}</textarea></div>
             <div class="form-group"><label class="form-label">Causa Raiz (Root Cause)</label><textarea class="form-input" id="capa-e-root">${escapeHTML(ca.root_cause||'')}</textarea></div>
@@ -1354,8 +1365,8 @@ import { navigate } from '../router.js';
             </div>
 
             <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:1.5rem">
-                <button class="btn" style="color:var(--danger)" onclick="window.deleteCAPA('${id}')">Excluir</button>
-                <button class="btn btn-primary" onclick="window.updateCAPA('${id}')">Salvar</button>
+                <button class="btn" style="color:var(--danger)" data-action="deleteCAPA" data-args='["${id}"]'>Excluir</button>
+                <button class="btn btn-primary" data-action="updateCAPA" data-args='["${id}"]'>Salvar</button>
             </div>
         `);
     };
@@ -1392,12 +1403,12 @@ import { navigate } from '../router.js';
         const proj = S.activeProject || S.projects[0];
         if (!proj) { 
             a.innerHTML = '';
-            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" onclick="openActiveProjectModal()" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
+            c.innerHTML = '<div class="empty-state fade-in"><h3>Sem projeto ativo</h3><p>Selecione um projeto para continuar.</p><button class="btn btn-primary" data-action="openActiveProjectModal" style="margin-top:1rem">Selecionar Projeto</button></div>'; 
             return; 
         }
         
         const canCrud = S.user && (S.user.role === 'platform_admin' || S.user.role === 'consultant' || S.user.role === 'consultor');
-        a.innerHTML = canCrud ? `<button class="btn btn-primary" onclick="window.openNewAuditModal('${proj.id}')">+ Nova Auditoria</button>` : '';
+        a.innerHTML = canCrud ? `<button class="btn btn-primary" data-action="openNewAuditModal" data-args='["${proj.id}"]'>+ Nova Auditoria</button>` : '';
 
         let audits = [];
         try { 
@@ -1423,7 +1434,7 @@ import { navigate } from '../router.js';
             audits.map(au => {
                 const statusBadgeType = au.status === 'Completed' ? 'success' : au.status === 'In Progress' ? 'warning' : 'info';
                 const executeBtn = au.status !== 'Completed' 
-                    ? `<button class="btn btn-primary btn-sm" style="margin-right:0.25rem" onclick="event.stopPropagation(); navigate('audit-execution', { activeAuditId: '${au.id}' })">Executar</button>`
+                    ? `<button class="btn btn-primary btn-sm" style="margin-right:0.25rem" data-action="navigate" data-args='["audit-execution",{"activeAuditId":"${au.id}"}]' data-stop>Executar</button>`
                     : '';
 
                 return [
@@ -1433,7 +1444,7 @@ import { navigate } from '../router.js';
                     au.scheduled_date || '—',
                     au.findings_count ? `<span style="color:var(--danger);font-weight:600">${au.findings_count} achados</span>` : '—',
                     window.renderStatusBadge(au.status || 'Planned', statusBadgeType),
-                    `${executeBtn}<button class="btn btn-ghost btn-sm" onclick="window.openAuditDetailsModal('${au.id}')">Detalhes</button>`
+                    `${executeBtn}<button class="btn btn-ghost btn-sm" data-action="openAuditDetailsModal" data-args='["${au.id}"]'>Detalhes</button>`
                 ];
             }),
             { emptyState: 'Nenhuma auditoria agendada para este projeto.' }
@@ -1454,7 +1465,7 @@ import { navigate } from '../router.js';
         openModal(`
             <div class="modal-header">
                 <span class="modal-title">Detalhes da Auditoria</span>
-                <button class="btn-ghost" onclick="forceCloseModal()">&times;</button>
+                <button class="btn-ghost" data-action="forceCloseModal">&times;</button>
             </div>
             <div style="display:flex; flex-direction:column; gap:16px; font-family:'Inter',sans-serif;">
                 <div style="font-family:'Montserrat',sans-serif; font-weight:700; font-size:1.3rem; color:var(--accent)">
@@ -1497,16 +1508,16 @@ import { navigate } from '../router.js';
                 </div>
             </div>
             <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px">
-                <button class="btn" onclick="forceCloseModal()">Fechar</button>
-                ${au.status !== 'Completed' ? `<button class="btn btn-primary" onclick="forceCloseModal(); navigate('audit-execution', { activeAuditId: '${id}' })">Executar Auditoria</button>` : ''}
-                ${canCrud ? `<button class="btn" style="border-color:var(--accent); color:var(--accent)" onclick="window.openEditAuditModal('${id}')">Editar Auditoria</button>` : ''}
+                <button class="btn" data-action="forceCloseModal">Fechar</button>
+                ${au.status !== 'Completed' ? `<button class="btn btn-primary" data-action="__grcCloseExecAudit" data-args='["${id}"]'>Executar Auditoria</button>` : ''}
+                ${canCrud ? `<button class="btn" style="border-color:var(--accent); color:var(--accent)" data-action="openEditAuditModal" data-args='["${id}"]'>Editar Auditoria</button>` : ''}
             </div>
         `);
     };
 
     window.openNewAuditModal = function(projectId) {
         openModal(`
-            <div class="modal-header"><span class="modal-title">Nova Auditoria</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Nova Auditoria</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Título</label><input class="form-input" id="aud-title" placeholder="Ex: Auditoria Interna Anual"></div>
             <div class="form-group"><label class="form-label">Tipo</label>
                 <select class="form-input" id="aud-type"><option>Internal</option><option>External</option><option>Surveillance</option><option>Certification</option></select></div>
@@ -1516,7 +1527,7 @@ import { navigate } from '../router.js';
             </div>
             <div class="form-group"><label class="form-label">Escopo</label><input class="form-input" id="aud-scope" placeholder="Ex: Controles A.5-A.8"></div>
             <div class="form-group"><label class="form-label">Notas / Observacoes</label><textarea class="form-input" id="aud-notes" placeholder="Detalhes adicionais..."></textarea></div>
-            <button class="btn btn-primary" style="width:100%" onclick="window.createAudit('${projectId}')">Agendar</button>
+            <button class="btn btn-primary" style="width:100%" data-action="createAudit" data-args='["${projectId}"]'>Agendar</button>
         `);
     };
 
@@ -1538,7 +1549,7 @@ import { navigate } from '../router.js';
         const au = S.audits.find(x => x.id === id) || {};
         const projectId = S.activeProject ? S.activeProject.id : '';
         openModal(`
-            <div class="modal-header"><span class="modal-title">Editar Auditoria</span><button class="btn-ghost" onclick="forceCloseModal()">&times;</button></div>
+            <div class="modal-header"><span class="modal-title">Editar Auditoria</span><button class="btn-ghost" data-action="forceCloseModal">&times;</button></div>
             <div class="form-group"><label class="form-label">Título</label><input class="form-input" id="aud-e-title" value="${escapeHTML(au.title||'')}"></div>
             <div class="form-group"><label class="form-label">Tipo</label>
                 <select class="form-input" id="aud-e-type">
@@ -1556,8 +1567,8 @@ import { navigate } from '../router.js';
             </div>
             <div class="form-group"><label class="form-label">Notas / Observacoes</label><textarea class="form-input" id="aud-e-notes">${escapeHTML(au.notes||'')}</textarea></div>
             <div style="display:flex;gap:0.5rem;justify-content:space-between;margin-top:1rem">
-                <button class="btn" style="color:var(--danger)" onclick="window.deleteAudit('${id}')">Excluir</button>
-                <button class="btn btn-primary" onclick="window.updateAudit('${id}')">Salvar</button>
+                <button class="btn" style="color:var(--danger)" data-action="deleteAudit" data-args='["${id}"]'>Excluir</button>
+                <button class="btn btn-primary" data-action="updateAudit" data-args='["${id}"]'>Salvar</button>
             </div>
         `);
     };
@@ -1587,7 +1598,7 @@ import { navigate } from '../router.js';
 
     async function renderAuditExecution(c, h, a) {
         h.textContent = 'Executar Auditoria Interna';
-        a.innerHTML = `<button onclick="navigate('audits')" class="btn" style="border-color:var(--border)">Voltar ao Calendário</button>`;
+        a.innerHTML = `<button data-action="navigate" data-args='["audits"]' class="btn" style="border-color:var(--border)">Voltar ao Calendário</button>`;
         if (!S.activeAuditId) {
             c.innerHTML = '<div style="padding:2rem;text-align:center;color:var(--muted)">Selecione uma auditoria no calendário.</div>';
             return;
@@ -1641,7 +1652,7 @@ import { navigate } from '../router.js';
                             </span>
                         </td>
                         <td style="text-align:center">
-                            <button onclick="window.openAddFindingModal('${ctrl.id}', '${escapeHTML(ctrl.standard)}')" class="btn" style="padding:4px 10px;font-size:0.75rem;border-color:var(--accent);color:var(--accent)">
+                            <button data-action="openAddFindingModal" data-args="${escapeHTML(JSON.stringify([ctrl.id, ctrl.standard]))}" class="btn" style="padding:4px 10px;font-size:0.75rem;border-color:var(--accent);color:var(--accent)">
                                 ${ctrlFindings.length > 0 ? 'Registrar Achado (' + ctrlFindings.length + ')' : '+ Novo Achado'}
                             </button>
                         </td>
@@ -1676,7 +1687,7 @@ import { navigate } from '../router.js';
                             ${f.auditor_notes ? `<div style="font-size:0.75rem;color:var(--muted);background:rgba(255,255,255,0.02);padding:6px 10px;border-radius:6px;margin-bottom:8px"><strong>Notas:</strong> ${escapeHTML(f.auditor_notes)}</div>` : ''}
                             <div style="display:flex;justify-content:space-between;align-items:center">
                                 <span style="font-size:0.7rem;color:var(--muted)">Registrado em: ${f.created_at.split('T')[0]}</span>
-                                <button onclick="window.deleteFinding('${f.id}')" class="btn" style="padding:2px 6px;font-size:0.7rem;color:red;border-color:rgba(255,0,0,0.15)">Deletar</button>
+                                <button data-action="deleteFinding" data-args='["${f.id}"]' class="btn" style="padding:2px 6px;font-size:0.7rem;color:red;border-color:rgba(255,0,0,0.15)">Deletar</button>
                             </div>
                         </div>
                     `;
@@ -1699,7 +1710,7 @@ import { navigate } from '../router.js';
             <div style="font-family:'Montserrat',sans-serif;font-weight:700;font-size:1.25rem;margin-bottom:1.5rem;color:var(--accent)">
                 Registrar Achado — Controle ${controlStandard}
             </div>
-            <form id="finding-form" onsubmit="window.submitFinding(event, '${controlId}')">
+            <form id="finding-form" data-action-submit="submitFinding" data-arg-event data-args='["${controlId}"]'>
                 <div class="form-group" style="margin-bottom:12px">
                     <label style="display:block;margin-bottom:4px;font-size:0.85rem">Tipo de Achado</label>
                     <select name="finding_type" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:8px 12px;color:var(--text)">
@@ -1722,7 +1733,7 @@ import { navigate } from '../router.js';
                     <textarea name="auditor_notes" style="width:100%;height:60px;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:8px 12px;color:var(--text);font-family:inherit" placeholder="Ex: Recomendações iniciais, referências normativas..."></textarea>
                 </div>
                 <div style="text-align:right">
-                    <button type="button" onclick="closeModal()" class="btn-secondary" style="margin-right:8px">Cancelar</button>
+                    <button type="button" data-action="closeModal" class="btn-secondary" style="margin-right:8px">Cancelar</button>
                     <button type="submit" class="btn-primary">Registrar Achado</button>
                 </div>
             </form>

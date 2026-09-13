@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS users (
     -- Contador atômico de tentativas do segundo fator (balde de 5 min).
     totp_fail_count INTEGER DEFAULT 0,
     totp_fail_window INTEGER,
+    -- Desprovisionamento por SCIM (migration 0028). Conta desativada CONTINUA
+    -- existindo — a trilha referencia o e-mail dela, e apagar reescreveria o
+    -- passado — mas não autentica. DEFAULT 1: nada muda para quem já existe.
+    ativo INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -241,6 +245,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_project ON audit_logs(project_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_operation ON audit_logs(operation_id);
+-- Retenção x imutabilidade (S-log): esta tabela é append-only por design
+-- (integridade de log, ISO 27001 A.8.15). Isso está em TENSÃO com um limite de
+-- retenção por expurgo (LGPD/ISO 27701 minimização): não se pode DELETE sem
+-- afrouxar os triggers abaixo, o que enfraquece a imutabilidade. A escolha aqui
+-- é: minimizar na ESCRITA (details nunca guarda conteúdo de titular — ver
+-- helpers.ts:logAudit) e manter a trilha imutável. Um expurgo por tempo é
+-- decisão de governança do controlador (exigiria um processo autorizado que
+-- relaxe os triggers) — não é feito silenciosamente no código.
 -- Trilha de auditoria imutável (append-only): bloqueia UPDATE/DELETE no nível do DB.
 CREATE TRIGGER IF NOT EXISTS audit_logs_no_update
 BEFORE UPDATE ON audit_logs
@@ -252,6 +264,48 @@ BEFORE DELETE ON audit_logs
 BEGIN
   SELECT RAISE(ABORT, 'audit_logs is append-only');
 END;
+
+-- SCIM 2.0 (migration 0028): o token que o IdP do cliente usa para provisionar e
+-- desprovisionar. Guardado como HASH — quem tem acesso ao banco não deve
+-- conseguir se passar pelo IdP do cliente.
+CREATE TABLE IF NOT EXISTS project_scim (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    token_hash TEXT NOT NULL,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    criado_por TEXT,
+    ultimo_uso_em DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_project_scim_token ON project_scim(token_hash);
+
+-- SSO por OIDC, por tenant (migration 0027). Tabela vazia = nenhum tenant usa
+-- SSO, e o login por senha segue sendo o único caminho. `client_secret` é
+-- gravado cifrado (src/secret-crypto.ts).
+CREATE TABLE IF NOT EXISTS project_sso (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    issuer TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_secret TEXT NOT NULL,
+    dominios TEXT NOT NULL,
+    papel_padrao TEXT NOT NULL DEFAULT 'org_user',
+    ativo INTEGER NOT NULL DEFAULT 0,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_por TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_sso_ativo ON project_sso(ativo);
+
+-- Política de segurança por tenant (migration 0026). Tabela vazia significa
+-- "todo mundo na postura padrão da plataforma": ausência de linha nunca é
+-- interpretada como restrição.
+CREATE TABLE IF NOT EXISTS project_security_policy (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    mfa_obrigatorio INTEGER NOT NULL DEFAULT 0,
+    sessao_ttl_seg INTEGER,
+    ip_allowlist TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+);
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -290,6 +344,12 @@ CREATE TABLE IF NOT EXISTS evidence (
     file_type TEXT,
     file_size INTEGER,
     uploaded_by TEXT NOT NULL,
+    -- Domínio canônico (D2, ver constants.ts EVALUATION_STATUSES): pending |
+    -- conforming | partial | non_conforming. Só o servidor escreve (sem input
+    -- livre). Sem CHECK aqui de propósito: evidence é referenciada por FK
+    -- (compliance_progress.evidence_id), então um rebuild p/ adicionar CHECK
+    -- arriscaria a integridade — a consistência é garantida na origem (constante +
+    -- normalização dos writes).
     evaluation_status TEXT DEFAULT 'pending',
     evaluation_score REAL,
     evaluation_notes TEXT,
@@ -863,6 +923,13 @@ CREATE TABLE IF NOT EXISTS scope_changes (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_scope_changes_project ON scope_changes(project_id);
+
+-- Contador de rate limit atômico (janela fixa) — ver migrations/0024 e rateLimitD1.
+CREATE TABLE IF NOT EXISTS rate_limits (
+    key TEXT PRIMARY KEY,
+    count INTEGER NOT NULL,
+    window_start INTEGER NOT NULL
+);
 
 -- -----------------------------------------------
 -- Documentos legais do n.iso (migration 0024)

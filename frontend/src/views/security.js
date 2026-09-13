@@ -44,7 +44,7 @@ window.openSecurityModal = async function openSecurityModal() {
     openModal(`<div style="${CAIXA}">
       <h3 style="${TITULO}">Autenticação em duas etapas</h3>
       <p style="${ERRO}">${escapeHTML(e.message)}</p>
-      <button class="btn" onclick="forceCloseModal()" style="margin-top:1rem">Fechar</button>
+      <button class="btn" data-action="forceCloseModal" style="margin-top:1rem">Fechar</button>
     </div>`);
     return;
   }
@@ -63,7 +63,7 @@ function telaInativo() {
     <div class="form-group">
       <label class="form-label">Confirme sua senha</label>
       <input type="password" id="mfa-setup-pass" class="form-input" autocomplete="current-password"
-             placeholder="••••••••" onkeydown="if(event.key==='Enter')doMfaSetup()">
+             placeholder="••••••••" data-action-keydown="doMfaSetup" data-key="Enter">
     </div>
     <p style="font-size:0.7rem;color:var(--muted);margin-bottom:1rem">
       Pedimos a senha porque vincular um autenticador é tão sensível quanto desligá-lo:
@@ -71,8 +71,8 @@ function telaInativo() {
     </p>
     <div id="mfa-erro" style="${ERRO}"></div>
     <div style="display:flex;gap:0.75rem;margin-top:1rem">
-      <button class="btn btn-primary" onclick="doMfaSetup()">Ativar</button>
-      <button class="btn" onclick="forceCloseModal()">Cancelar</button>
+      <button class="btn btn-primary" data-action="doMfaSetup">Ativar</button>
+      <button class="btn" data-action="forceCloseModal">Cancelar</button>
     </div>
   </div>`);
   setTimeout(() => document.getElementById('mfa-setup-pass')?.focus(), 50);
@@ -116,12 +116,12 @@ function telaQr(secret, otpauthUrl) {
       <input type="text" id="mfa-codigo" class="form-input" inputmode="numeric" maxlength="6"
              autocomplete="one-time-code" placeholder="000000"
              style="text-align:center;letter-spacing:6px;font-weight:600"
-             onkeydown="if(event.key==='Enter')doMfaActivate()">
+             data-action-keydown="doMfaActivate" data-key="Enter">
     </div>
     <div id="mfa-erro" style="${ERRO}"></div>
     <div style="display:flex;gap:0.75rem;margin-top:1rem">
-      <button class="btn btn-primary" onclick="doMfaActivate()">Confirmar e ativar</button>
-      <button class="btn" onclick="forceCloseModal()">Cancelar</button>
+      <button class="btn btn-primary" data-action="doMfaActivate">Confirmar e ativar</button>
+      <button class="btn" data-action="forceCloseModal">Cancelar</button>
     </div>
   </div>`);
   setTimeout(() => document.getElementById('mfa-codigo')?.focus(), 50);
@@ -163,7 +163,7 @@ function telaSemCodigos() {
       antes de fechar. Sem os códigos, perder o acesso ao autenticador significa
       perder a conta.
     </p>
-    <button class="btn btn-primary" onclick="openSecurityModal()">Gerenciar segundo fator</button>
+    <button class="btn btn-primary" data-action="openSecurityModal">Gerenciar segundo fator</button>
   </div>`);
 }
 
@@ -185,8 +185,8 @@ function telaCodigosRecuperacao(codigos) {
     <div style="font-family:monospace;font-size:0.85rem;background:var(--surface);padding:1rem;
                 border-radius:8px;line-height:1.9;letter-spacing:1px;margin-bottom:1rem">${lista}</div>
     <div style="display:flex;gap:0.75rem">
-      <button class="btn btn-primary" onclick="baixarCodigosMfa()">Baixar .txt</button>
-      <button class="btn" onclick="forceCloseModal()">Já guardei</button>
+      <button class="btn btn-primary" data-action="baixarCodigosMfa">Baixar .txt</button>
+      <button class="btn" data-action="forceCloseModal">Já guardei</button>
     </div>
   </div>`);
   window._mfaCodigos = codigos;
@@ -225,7 +225,7 @@ function telaAtivo(restantes) {
     <div class="form-group">
       <label class="form-label">Para desativar, confirme sua senha</label>
       <input type="password" id="mfa-off-pass" class="form-input" autocomplete="current-password"
-             placeholder="••••••••" onkeydown="if(event.key==='Enter')doMfaDisable()">
+             placeholder="••••••••" data-action-keydown="doMfaDisable" data-key="Enter">
     </div>
     <p style="font-size:0.7rem;color:var(--muted);margin-bottom:1rem">
       Desativar encerra <strong>todas as suas sessões abertas</strong>, inclusive esta:
@@ -233,8 +233,8 @@ function telaAtivo(restantes) {
     </p>
     <div id="mfa-erro" style="${ERRO}"></div>
     <div style="display:flex;gap:0.75rem;margin-top:1rem">
-      <button class="btn btn-danger" onclick="doMfaDisable()">Desativar</button>
-      <button class="btn" onclick="forceCloseModal()">Fechar</button>
+      <button class="btn btn-danger" data-action="doMfaDisable">Desativar</button>
+      <button class="btn" data-action="forceCloseModal">Fechar</button>
     </div>
   </div>`);
 }
