@@ -11,6 +11,12 @@
 -- linhas com o mesmo id, e é assim que a tela sabe dizer "em lote (3 controles)".
 -- É também o que liga uma operação ao registro de que ela foi desfeita — o
 -- desfazer NÃO apaga linha nenhuma, porque a tabela é append-only por trigger.
+--
+-- O QUE CONFERIR ANTES DE APLICAR EM PRODUÇÃO: backup, e que os triggers
+-- `audit_logs_no_update`/`audit_logs_no_delete` (migration 0018) existam em
+-- `sqlite_master` antes E depois: ALTER TABLE ADD COLUMN não os derruba, mas é
+-- a invariante que esta tabela existe para manter. Colunas nullable sem
+-- DEFAULT: aditivo, não reescreve a tabela.
 
 ALTER TABLE audit_logs ADD COLUMN entity_type TEXT;
 ALTER TABLE audit_logs ADD COLUMN entity_id TEXT;

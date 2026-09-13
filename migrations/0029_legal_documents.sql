@@ -11,6 +11,11 @@
 -- em disputa. É append-only na prática — não há caminho de UPDATE.
 --
 -- Aditiva: nenhuma tabela existente é tocada.
+--
+-- O QUE CONFERIR ANTES DE APLICAR EM PRODUÇÃO: backup, e que não existam tabelas
+-- `legal_documents`/`legal_acceptances` de outra origem (CREATE IF NOT EXISTS
+-- silenciaria uma colisão). Só cria tabelas e índices; nada existente muda.
+-- Sem documento publicado, o gate do middleware não barra ninguém.
 
 CREATE TABLE IF NOT EXISTS legal_documents (
     id TEXT PRIMARY KEY,
