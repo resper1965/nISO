@@ -21,7 +21,7 @@
     "typescript": "^5.5.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.107.0",
-    "zod": "^4.5.4"
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@types/node": "^26.5.0",
