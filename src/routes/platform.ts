@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
-import { logAudit, requireResourceAccess, escapeHtml, erro500, registraErro, autoridadeDeAssinatura, recusaDeAssinatura } from '../helpers';
+import { logAudit, requireResourceAccess, escapeHtml, erro500, registraErro, autoridadeDeAssinatura, recusaDeAssinatura, ehEquipeNess, somenteNess } from '../helpers';
+import { verificarCadeia } from '../trilha';
 import { PHASE_TITLES, PHASE_CHECKLISTS } from '../constants';
 import { DEFAULT_FINANCIAL_MODEL } from '../services/pricing';
 
@@ -10,9 +11,16 @@ export const platformApp = new Hono<{ Bindings: Bindings; Variables: Variables }
 
 // Assets standalone CRUD
 platformApp.put('/assets/:id', async (c) => {
+  // A guarda fica DENTRO do try, como em todo o resto do repositório: o `catch`
+  // abaixo é o caminho PRIMÁRIO de tradução de `Forbidden: ...` em 403, e o
+  // ramo equivalente no `app.onError` é a rede — existe para o handler que
+  // esquecer o try, não para substituir este. Fora do try, a recusa escapava e
+  // virava 500: sem vazar dado, mas com o contrato errado e com recusa de
+  // rotina contando como erro de servidor na taxa de 5xx que a operação
+  // monitora.
   const id = c.req.param('id');
-  await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
   try {
+    await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
     const user = c.get('user');
     if (user && user.role === 'org_user') {
       return c.json({ error: 'Forbidden: Cannot edit asset' }, 403);
@@ -31,9 +39,11 @@ platformApp.put('/assets/:id', async (c) => {
 });
 
 platformApp.delete('/assets/:id', async (c) => {
+  // Mesma correção do PUT acima: a guarda tem de estar dentro do try, que é
+  // quem traduz a recusa em 403.
   const id = c.req.param('id');
-  await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
   try {
+    await requireResourceAccess(c.env.DB, 'assets', id, c.get('user'));
     const user = c.get('user');
     if (user && user.role === 'org_user') {
       return c.json({ error: 'Forbidden: Cannot delete asset' }, 403);
@@ -160,6 +170,27 @@ platformApp.get('/projects/:id/dpia/:assessmentId/report', async (c) => {
   }
 });
 
+/**
+ * Verificação da cadeia da trilha arquivada (item 4.4 do plano).
+ *
+ * Existe como ROTA, e não só como teste, porque a pergunta "a trilha foi
+ * adulterada?" aparece durante um incidente ou uma auditoria — momentos em que
+ * ninguém vai rodar a suíte. A verificação percorre o R2 e RECALCULA cada
+ * digest; comparar só metadado seria teatro, porque quem reescreve o objeto
+ * reescreve o metadado junto.
+ *
+ * Restrita à equipe ness.: o resultado diz quantos dias existem e onde a cadeia
+ * quebra, que é informação de operação da plataforma, não de um tenant.
+ */
+platformApp.get('/admin/trilha/verificar', somenteNess, async (c) => {
+  try {
+    const r = await verificarCadeia(c.env);
+    return c.json({ ok: true, ...r }, r.intacta ? 200 : 409);
+  } catch (e: any) {
+    return erro500(c, 'Falha ao verificar a cadeia da trilha', e);
+  }
+});
+
 // Policy Templates & Marketplace
 platformApp.get('/policy-templates', async (c) => {
   const { results } = await c.env.DB.prepare('SELECT * FROM policy_templates ORDER BY iso_ref').all();
@@ -212,15 +243,29 @@ platformApp.get('/dashboard', async (c) => {
 platformApp.get('/dashboard/stats', async (c) => {
   try {
     const user = c.get('user');
-    const isClient = user && (user.role === 'org_admin' || user.role === 'org_user' || user.role === 'client');
-    const projectId = isClient ? user.client_project_id : null;
-    
-    const whereResource = projectId ? 'WHERE project_id = ?' : '';
-    const whereProject = projectId ? 'WHERE id = ?' : '';
-    const params = projectId ? [projectId] : [];
 
-    const stats: any = await c.env.DB.batch([
-      c.env.DB.prepare('SELECT count(*) as count FROM leads'),
+    // Mesma inversão do `/portfolio` acima, pelos mesmos dois motivos: só a
+    // equipe ness. conta a plataforma inteira; qualquer outro papel — inclusive
+    // um fora da lista conhecida, e inclusive sem projeto — é escopado.
+    //
+    // UMA variável decide tudo: `null` é o ramo da ness. (sem WHERE), string é
+    // o escopo do cliente. A string pode ser VAZIA, e é esse o ponto —
+    // `WHERE id = ''` não casa com nada, então cliente sem projeto conta zero
+    // em vez de contar a plataforma inteira.
+    const escopo: string | null = ehEquipeNess(user) ? null : (user?.client_project_id ?? '');
+
+    const whereResource = escopo === null ? '' : 'WHERE project_id = ?';
+    const whereProject = escopo === null ? '' : 'WHERE id = ?';
+    const params = escopo === null ? [] : [escopo];
+
+    const stats = await c.env.DB.batch<{ count: number }>([
+      // O funil comercial é da ness. (ver `somenteNess` em helpers.ts): cliente
+      // não vê lead — nem o conteúdo, nem quantos existem. A contagem era
+      // global para todo mundo. O `SELECT 0` mantém o alinhamento posicional do
+      // batch, para os índices abaixo não dependerem do papel de quem pergunta.
+      escopo === null
+        ? c.env.DB.prepare('SELECT count(*) as count FROM leads')
+        : c.env.DB.prepare('SELECT 0 as count'),
       c.env.DB.prepare(`SELECT count(*) as count FROM projects ${whereProject}`).bind(...params),
       c.env.DB.prepare(`SELECT count(*) as count FROM compliance_controls ${whereResource} ${whereResource ? "AND" : "WHERE"} status = 'Completed'`).bind(...params),
       c.env.DB.prepare(`SELECT count(*) as count FROM evidence ${whereResource} ${whereResource ? "AND" : "WHERE"} evaluation_status = 'pending'`).bind(...params),
@@ -272,15 +317,43 @@ platformApp.get('/client/dashboard', async (c) => {
   }
 });
 
+/*
+ * PORTAL DO CLIENTE — o vínculo com o funil comercial.
+ *
+ * As duas rotas abaixo estavam MORTAS. As duas começavam com
+ * `if (!user.client_lead_id) return 404`, e `users.client_lead_id` nunca
+ * existiu: não está em `schema.sql` nem em nenhuma das 25 migrations, e o login
+ * não seleciona a coluna. Respondiam 404 para todo mundo, sempre — inclusive
+ * quando o assessment e a proposta existiam no banco.
+ *
+ * A correção NÃO é criar a coluna. Um `client_lead_id` em `users` seria um
+ * terceiro lugar guardando um vínculo que o banco já tem, e que passaria a
+ * poder divergir dos outros dois. O caminho já está gravado pelo próprio fluxo
+ * de conversão:
+ *
+ *   users.client_project_id → projects.assessment_id → assessments.id
+ *                                                    ↳ proposals.assessment_id
+ *
+ * `POST /api/v1/assessments/:id/convert` grava `projects.assessment_id`, e as
+ * duas rotas que criam proposta gravam `proposals.assessment_id`. Derivar dali
+ * é correto por construção e não tem o que sincronizar.
+ *
+ * O isolamento também sai de graça: o filtro é `projects.id = <projeto do
+ * usuário>`, então não há id vindo do cliente para forjar. Conta de staff
+ * (`client_project_id` nulo) não casa com projeto nenhum e recebe 404 — o
+ * portal do cliente é do cliente.
+ */
+
 platformApp.get('/client/assessment', async (c) => {
   try {
     const user = c.get('user');
-    if (!user.client_lead_id) {
-      return c.json({ error: 'Nenhum lead comercial associado a esta conta' }, 404);
-    }
-    const assessment = await c.env.DB.prepare('SELECT id FROM assessments WHERE lead_id = ?').bind(user.client_lead_id).first() as any;
+    const assessment = await c.env.DB.prepare(
+      `SELECT a.id FROM assessments a
+       JOIN projects p ON p.assessment_id = a.id
+       WHERE p.id = ?`
+    ).bind(user?.client_project_id ?? '').first() as any;
     if (!assessment) {
-      return c.json({ error: 'Assessment não encontrado para este lead' }, 404);
+      return c.json({ error: 'Nenhum assessment associado a esta conta' }, 404);
     }
     return c.json({ assessment_id: assessment.id });
   } catch (e: any) {
@@ -291,12 +364,17 @@ platformApp.get('/client/assessment', async (c) => {
 platformApp.get('/client/proposal', async (c) => {
   try {
     const user = c.get('user');
-    if (!user.client_lead_id) {
-      return c.json({ error: 'Nenhum lead comercial associado a esta conta' }, 404);
-    }
-    const proposal = await c.env.DB.prepare('SELECT id, status FROM proposals WHERE lead_id = ?').bind(user.client_lead_id).first() as any;
+    // `ORDER BY created_at DESC LIMIT 1`: o mesmo assessment pode gerar mais de
+    // uma proposta (a geração automática e a manual usam a mesma tabela). A que
+    // interessa ao cliente é a última.
+    const proposal = await c.env.DB.prepare(
+      `SELECT pr.id, pr.status FROM proposals pr
+       JOIN projects p ON p.assessment_id = pr.assessment_id
+       WHERE p.id = ?
+       ORDER BY pr.created_at DESC LIMIT 1`
+    ).bind(user?.client_project_id ?? '').first() as any;
     if (!proposal) {
-      return c.json({ error: 'Proposta não encontrada para este lead' }, 404);
+      return c.json({ error: 'Nenhuma proposta associada a esta conta' }, 404);
     }
     return c.json({ proposal_id: proposal.id, status: proposal.status });
   } catch (e: any) {
@@ -326,10 +404,22 @@ platformApp.put('/notifications/:id/read', async (c) => {
 platformApp.get('/portfolio', async (c) => {
   try {
     const user = c.get('user');
-    let stmt = c.env.DB.prepare('SELECT * FROM projects ORDER BY created_at DESC');
-    if (user && (user.role === 'org_admin' || user.role === 'org_user' || user.role === 'client') && user.client_project_id) {
-      stmt = c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(user.client_project_id);
-    }
+    // Duas coisas erravam aqui, e as duas na mesma direção — abrindo:
+    //
+    // 1. a condição exigia `&& user.client_project_id`, então papel de cliente
+    //    SEM projeto caía no ramo de plataforma (conta criável hoje:
+    //    `createUserSchema` declara o campo `.nullable().optional()`);
+    // 2. o ramo escopado era escolhido por allowlist de papel-CLIENTE, e
+    //    `users.role` é TEXT livre — um papel fora da lista, como `ciso`
+    //    (que a própria suíte usa), enxergava a carteira de TODOS os tenants.
+    //
+    // Agora quem decide é `ehEquipeNess`: só a equipe ness. vê a plataforma
+    // inteira, e todo o resto é escopado ao próprio projeto. Papel desconhecido
+    // cai no lado seguro. Com o escopo vazio, `WHERE id = ''` não casa com
+    // nada — escopo ausente significa NADA, nunca TUDO.
+    const stmt = ehEquipeNess(user)
+      ? c.env.DB.prepare('SELECT * FROM projects ORDER BY created_at DESC')
+      : c.env.DB.prepare('SELECT * FROM projects WHERE id = ?').bind(user?.client_project_id ?? '');
     const { results } = await stmt.all();
     return c.json({ ok: true, portfolio: results || [], projects: results || [] });
   } catch (e: any) {

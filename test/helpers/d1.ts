@@ -74,7 +74,14 @@ export async function resetSessions(): Promise<void> {
  */
 export async function sessionFor(user: Record<string, unknown>): Promise<Record<string, string>> {
   const id = `sess-${crypto.randomUUID()}`;
-  await env.SESSIONS.put(`session_${id}`, JSON.stringify(user));
+  // `iat` e `seen` são carimbados pelo login real (routes/auth.ts): `iat` é o
+  // que permite revogar a sessão, `seen` é o relógio da expiração por
+  // inatividade. Sem eles a fixture produzia uma sessão de formato que o login
+  // nunca emite — e que o middleware, com razão, recusa.
+  // Quem quiser testar sessão velha passa o próprio `seen`.
+  const agora = Date.now();
+  const sessao = { iat: agora, seen: agora, ...user };
+  await env.SESSIONS.put(`session_${id}`, JSON.stringify(sessao));
   return { Authorization: `Bearer ${id}` };
 }
 
@@ -91,4 +98,26 @@ export async function seedTwoProjects(): Promise<void> {
       `INSERT INTO projects (id, client_name, standards, org_role, status) VALUES (?, ?, ?, ?, ?)`
     ).bind('proj-b', 'Cliente B', 'ISO 27001', 'controller', 'Active'),
   ]);
+}
+
+/**
+ * `env` do worker com o binding de IA trocado por stub.
+ *
+ * Oito arquivos de teste declaravam esta mesma função local. Ela vive aqui para
+ * que o stub de IA tenha UMA definição — teste que exercita rota com IA sem o
+ * stub estoura no `env.AI.run`, e descobrir isso arquivo a arquivo é
+ * desperdício. Os arquivos anteriores a 2026-09 ainda têm a cópia local;
+ * migram quando forem tocados.
+ */
+export function workerEnv(): any {
+  return { ...env, AI: { run: async () => ({ response: 'stub' }) } };
+}
+
+/** Requisição ao worker montado, com o `workerEnv()` acima. */
+export async function pedir(
+  worker: { fetch: (r: Request, e: any) => Promise<Response> },
+  caminho: string,
+  init: RequestInit = {}
+): Promise<Response> {
+  return worker.fetch(new Request(`http://localhost${caminho}`, init), workerEnv());
 }
