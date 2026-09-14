@@ -52,7 +52,13 @@ export type Bindings = {
   AI: Ai;
   SETUP_KEY?: string;
   /** Segredo do desafio anti-abuso do login. Sem ele o desafio não é exigido
-      nem anunciado; o bloqueio temporário continua valendo. */
+      nem anunciado; o bloqueio temporário continua valendo.
+
+      NÃO É CONFIGURAÇÃO OPCIONAL ISOLADA — é um interruptor de duas pontas.
+      Defini-lo faz o servidor EXIGIR `challengeToken` a partir da 2ª falha, e a
+      tela de entrada ainda não monta widget nenhum (o container existe, o script
+      do Turnstile e a site key não). Ligar só este segredo tranca para fora quem
+      errar a senha uma vez. O que falta está na issue #170. */
   TURNSTILE_SECRET_KEY?: string;
   /** Chave para cifrar segredos em repouso (repository_token). Secret:
    *  `npx wrangler secret put TOKEN_ENC_KEY`. Sem ela, tokens são gravados em
