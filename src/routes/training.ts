@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
 import { genId, logAudit, requireResourceAccess, erro500 } from '../helpers';
-import { validateBody, trainingSchema, trainingImportSchema } from '../schemas';
+import { validateBody, trainingSchema, trainingImportSchema, trainingUpdateSchema } from '../schemas';
 
 export const trainingApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 export const projectTrainingApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -14,9 +14,9 @@ trainingApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'training_records', id, c.get('user'));
-    const valid = await validateBody(c, trainingSchema);
-    if (!valid.success) return valid.response;
-    const body = valid.data as any;
+    const v = await validateBody(c, trainingUpdateSchema);
+    if (!v.success) return v.response;
+    const body = v.data as any;
 
     await c.env.DB.prepare(
       `UPDATE training_records SET employee_name=?, training_name=?, completion_date=?, score=?, status=?, evidence_file=? WHERE id=?`
@@ -24,6 +24,7 @@ trainingApp.put('/:id', async (c) => {
 
     return c.json({ ok: true, id });
   } catch (e: any) {
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar treinamento', e);
   }
 
@@ -36,6 +37,7 @@ trainingApp.delete('/:id', async (c) => {
     await c.env.DB.prepare('DELETE FROM training_records WHERE id = ?').bind(id).run();
     return c.json({ ok: true });
   } catch (e: any) {
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir treinamento', e);
   }
 });

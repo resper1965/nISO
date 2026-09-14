@@ -372,3 +372,107 @@ export const dpiaSchema = z.object({
   dpo_recommendations: longoOpcional,
   status: curtoOpcional,
 }).passthrough();
+
+// ——— Documentos legais ————————————————————————————————————————————————
+// A classificação é enum fechado de propósito: é ela que decide se uma versão
+// nova avisa ou barra o acesso, e um valor livre ali viraria bloqueio por
+// digitação errada (ou a ausência dele, por engano).
+export const legalPublishSchema = z.object({
+  kind: curto,
+  version: curto,
+  classification: z.enum(['comum', 'material']),
+  title: curto,
+  url: curtoOpcional,
+  /** false publica como rascunho: fica fora da conta de pendências. */
+  publish: z.boolean().optional(),
+}).passthrough();
+
+/** Desfazer de uma operação da trilha por campo: só o id da operação. */
+export const trilhaDesfazerSchema = z.object({
+  operacao: z.string().trim().min(1).max(100),
+}).passthrough();
+
+export const legalAcceptSchema = z.object({
+  // Teto baixo porque a tela aceita dois documentos; mil ids num POST é abuso,
+  // não uso.
+  documentIds: z.array(z.string().trim().min(1).max(200)).min(1).max(20),
+}).passthrough();
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  PORTAL PÚBLICO DE POLÍTICAS — rotas SEM autenticação
+// ═════════════════════════════════════════════════════════════════════════════
+
+/*
+ * As três rotas abaixo eram lidas com `c.req.json()` cru e conferidas com
+ * `if (!campo)`. Isso aceita QUALQUER tipo desde que não seja vazio, e os
+ * handlers chamam `email.trim().toLowerCase()` logo depois — então
+ * `{"email": 123}` num endpoint público derrubava a requisição em 500 no
+ * `trim is not a function`. Recusar com 400 é o comportamento certo, e é o que
+ * a validação faz.
+ */
+
+export const otpPedidoSchema = z.object({
+  project_id: z.string().min(1, 'Projeto é obrigatório'),
+  email: z.string().email('E-mail inválido'),
+  name: z.string().optional(),
+});
+
+export const otpVerificacaoSchema = z.object({
+  project_id: z.string().min(1, 'Projeto é obrigatório'),
+  email: z.string().email('E-mail inválido'),
+  otp: z.string().min(1, 'Código OTP é obrigatório'),
+});
+
+/** Aceite de política. Nome e e-mail caem para os da sessão quando ausentes. */
+export const aceiteDePoliticaSchema = z.object({
+  policy_type: z.string().min(1, 'Tipo/Nome da Política é obrigatório'),
+  user_name: z.string().optional(),
+  user_email: z.string().email('E-mail inválido').optional(),
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  MFA e direitos do titular — eram locais aos arquivos de rota
+// ═════════════════════════════════════════════════════════════════════════════
+
+/*
+ * Estes três viviam como `const` não exportada dentro de `routes/mfa.ts` e
+ * `routes/data-subject.ts`. Vieram para cá quando o `openapi.ts` passou a
+ * precisar deles: schema que só existe dentro do handler não entra no contrato
+ * publicado, e a rota sumiria da documentação sem que nada acusasse.
+ *
+ * `.passthrough()` é deliberado nos três — o corpo pode trazer campos extras que
+ * o handler ignora — e por isso o JSON Schema gerado sai com
+ * `additionalProperties: true`, que é a descrição correta.
+ */
+
+/** Código TOTP ou de recuperação. */
+export const codigoSchema = z.object({
+  codigo: z.string().trim().min(6).max(20),
+}).passthrough();
+
+/** Confirmação de senha onde a sessão sozinha não basta (desligar MFA, por ex.). */
+export const senhaConfirmacaoSchema = z.object({
+  password: z.string().min(1).max(500),
+}).passthrough();
+
+/** Pedido de direito do titular (LGPD): quem é, e por quê. */
+export const identificadorSchema = z.object({
+  identificador: z.string().trim().min(1).max(320),
+  justificativa: z.string().trim().min(1).max(2000),
+}).passthrough();
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  POLÍTICA DE SEGURANÇA POR TENANT (item 4.3)
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * O `sessao_ttl_seg` tem PISO de 5 minutos: um TTL de poucos segundos, digitado
+ * por engano, expulsaria todo mundo do cliente a cada requisição, e o caminho de
+ * conserto passa por uma sessão. O teto de 24h é o máximo da plataforma — a
+ * política aperta, nunca afrouxa.
+ */
+export const politicaTenantSchema = z.object({
+  mfa_obrigatorio: z.coerce.boolean().optional(),
+  sessao_ttl_seg: z.coerce.number().int().min(300, 'TTL mínimo é 300 s').max(86400, 'TTL máximo é 86400 s').nullish(),
+  ip_allowlist: z.string().max(2000).nullish(),
+}).passthrough();

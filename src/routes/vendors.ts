@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { Bindings, Variables } from '../index';
 
 import { genId, logAudit, requireResourceAccess, erro500 } from '../helpers';
-import { validateBody, createVendorSchema } from '../schemas';
+import { validateBody, createVendorSchema, vendorUpdateSchema } from '../schemas';
 
 export const vendorsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 export const projectVendorsApp = new Hono<{ Bindings: Bindings; Variables: Variables }>();
@@ -35,9 +35,9 @@ vendorsApp.put('/:id', async (c) => {
   try {
     const id = c.req.param('id');
     await requireResourceAccess(c.env.DB, 'vendors', id, c.get('user'));
-    const valid = await validateBody(c, createVendorSchema);
-    if (!valid.success) return valid.response;
-    const body = valid.data as any;
+    const v = await validateBody(c, vendorUpdateSchema);
+    if (!v.success) return v.response;
+    const body = v.data as any;
     const ts = calculateTrustScore(body);
     const dl = diligenceLevel(ts);
 
@@ -51,6 +51,7 @@ vendorsApp.put('/:id', async (c) => {
 
     return c.json({ ok: true, id, diligence_level: dl, trust_score: ts });
   } catch (e: any) {
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao atualizar vendor', e);
   }
 
@@ -63,6 +64,7 @@ vendorsApp.delete('/:id', async (c) => {
     await c.env.DB.prepare('DELETE FROM vendors WHERE id = ?').bind(id).run();
     return c.json({ ok: true });
   } catch (e: any) {
+    if (e.message && e.message.startsWith('Forbidden')) return c.json({ error: e.message }, 403);
     return erro500(c, 'Falha ao excluir vendor', e);
   }
 });

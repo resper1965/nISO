@@ -24,6 +24,10 @@ CREATE TABLE IF NOT EXISTS users (
     -- Contador atômico de tentativas do segundo fator (balde de 5 min).
     totp_fail_count INTEGER DEFAULT 0,
     totp_fail_window INTEGER,
+    -- Desprovisionamento por SCIM (migration 0028). Conta desativada CONTINUA
+    -- existindo — a trilha referencia o e-mail dela, e apagar reescreveria o
+    -- passado — mas não autentica. DEFAULT 1: nada muda para quem já existe.
+    ativo INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -225,9 +229,22 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     -- NOT NULL aqui derrubaria o registro dessas ações — perder trilha para
     -- ganhar constraint é o inverso do objetivo.
     project_id TEXT,
+    -- Trilha por CAMPO (migration 0025). Nullable: a maioria das chamadas de
+    -- logAudit registra acao de plataforma, que nao tem campo antes/depois.
+    -- `operation_id` agrupa a operacao — uma acao em lote sobre 3 controles
+    -- gera 3 linhas com o mesmo id — e liga a operacao ao registro de que ela
+    -- foi desfeita. Desfazer NAO apaga linha: a tabela e append-only.
+    entity_type TEXT,
+    entity_id TEXT,
+    field TEXT,
+    old_value TEXT,
+    new_value TEXT,
+    operation_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_project ON audit_logs(project_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON audit_logs(entity_type, entity_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_operation ON audit_logs(operation_id);
 -- Retenção x imutabilidade (S-log): esta tabela é append-only por design
 -- (integridade de log, ISO 27001 A.8.15). Isso está em TENSÃO com um limite de
 -- retenção por expurgo (LGPD/ISO 27701 minimização): não se pode DELETE sem
@@ -247,6 +264,48 @@ BEFORE DELETE ON audit_logs
 BEGIN
   SELECT RAISE(ABORT, 'audit_logs is append-only');
 END;
+
+-- SCIM 2.0 (migration 0028): o token que o IdP do cliente usa para provisionar e
+-- desprovisionar. Guardado como HASH — quem tem acesso ao banco não deve
+-- conseguir se passar pelo IdP do cliente.
+CREATE TABLE IF NOT EXISTS project_scim (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    token_hash TEXT NOT NULL,
+    ativo INTEGER NOT NULL DEFAULT 1,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    criado_por TEXT,
+    ultimo_uso_em DATETIME
+);
+CREATE INDEX IF NOT EXISTS idx_project_scim_token ON project_scim(token_hash);
+
+-- SSO por OIDC, por tenant (migration 0027). Tabela vazia = nenhum tenant usa
+-- SSO, e o login por senha segue sendo o único caminho. `client_secret` é
+-- gravado cifrado (src/secret-crypto.ts).
+CREATE TABLE IF NOT EXISTS project_sso (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    issuer TEXT NOT NULL,
+    client_id TEXT NOT NULL,
+    client_secret TEXT NOT NULL,
+    dominios TEXT NOT NULL,
+    papel_padrao TEXT NOT NULL DEFAULT 'org_user',
+    ativo INTEGER NOT NULL DEFAULT 0,
+    criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+    atualizado_por TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_project_sso_ativo ON project_sso(ativo);
+
+-- Política de segurança por tenant (migration 0026). Tabela vazia significa
+-- "todo mundo na postura padrão da plataforma": ausência de linha nunca é
+-- interpretada como restrição.
+CREATE TABLE IF NOT EXISTS project_security_policy (
+    project_id TEXT PRIMARY KEY REFERENCES projects(id),
+    mfa_obrigatorio INTEGER NOT NULL DEFAULT 0,
+    sessao_ttl_seg INTEGER,
+    ip_allowlist TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_by TEXT
+);
 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
@@ -871,6 +930,37 @@ CREATE TABLE IF NOT EXISTS rate_limits (
     count INTEGER NOT NULL,
     window_start INTEGER NOT NULL
 );
+
+-- -----------------------------------------------
+-- Documentos legais do n.iso (migration 0024)
+-- -----------------------------------------------
+-- A `classification` é CAMPO DO DOCUMENTO, não julgamento de quem publica: é
+-- ela que decide se uma versão nova apenas avisa ('comum') ou barra o acesso
+-- até o aceite ('material' — mudança de base legal ou de retenção).
+CREATE TABLE IF NOT EXISTS legal_documents (
+    id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    version TEXT NOT NULL,
+    classification TEXT NOT NULL CHECK (classification IN ('comum', 'material')),
+    title TEXT NOT NULL,
+    url TEXT,
+    published_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (kind, version)
+);
+CREATE INDEX IF NOT EXISTS idx_legal_documents_kind ON legal_documents(kind, published_at);
+
+-- Data, IP e user-agent: sem os três o registro não prova nada em disputa.
+CREATE TABLE IF NOT EXISTS legal_acceptances (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    document_id TEXT NOT NULL REFERENCES legal_documents(id),
+    accepted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    ip TEXT,
+    user_agent TEXT,
+    UNIQUE (user_id, document_id)
+);
+CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user ON legal_acceptances(user_id);
 
 -- -----------------------------------------------
 -- ÍNDICES em colunas quentes (filtros frequentes)

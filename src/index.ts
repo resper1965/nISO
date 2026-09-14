@@ -8,6 +8,7 @@ import { log, requestId, metrica, resumoErro } from './observability';
 import { queryCapMiddleware } from './middleware/query-cap';
 import { bodyGuard } from './middleware/body-guard';
 import { rateLimitMiddleware } from './middleware/rate-limit';
+import { sessaoApp } from './routes/auth';
 import { authApp } from './routes/auth';
 import { usersApp } from './routes/users';
 import { leadsApp } from './routes/leads';
@@ -15,6 +16,7 @@ import { proposalsApp } from './routes/proposals';
 import { assessmentsApp } from './routes/assessments';
 import { projectsApp } from './routes/projects';
 import { controlsApp } from './routes/controls';
+import { legalApp } from './routes/legal';
 import { evidenceApp, projectEvidenceApp } from './routes/evidence';
 import { vendorsApp, projectVendorsApp } from './routes/vendors';
 import { trainingApp, projectTrainingApp } from './routes/training';
@@ -23,10 +25,12 @@ import { auditsApp, projectAuditsApp } from './routes/audits';
 import { capaApp, projectCapaApp } from './routes/capa';
 import { certificationsApp, projectCertificationsApp } from './routes/certifications';
 import { publicApp } from './routes/public';
+import { scimApp } from './routes/scim';
 import { aiApp } from './routes/ai';
 import { governanceApp } from './routes/governance';
 import { auditorApp } from './routes/auditor';
 import { platformApp } from './routes/platform';
+import { documentoOpenApi } from './openapi';
 import { mfaApp } from './routes/mfa';
 import { dataSubjectApp } from './routes/data-subject';
 
@@ -38,6 +42,7 @@ import { controlAdequacaoApp } from './routes/control-adequacao';
 import risks from './routes/risks';
 import policies from './routes/policies';
 import integrations from './routes/integrations';
+import { manutencaoDiaria } from './manutencao';
 
 export type Bindings = {
   DB: D1Database;
@@ -46,6 +51,19 @@ export type Bindings = {
   STORAGE: R2Bucket;
   AI: Ai;
   SETUP_KEY?: string;
+  /** Segredo do desafio anti-abuso do login, conferido contra o siteverify do
+      Turnstile. Sem ele o desafio não é exigido nem anunciado; o bloqueio
+      temporário continua valendo.
+
+      Só liga o desafio EM PAR com `TURNSTILE_SITE_KEY` — ver `desafioVerificavel`
+      em routes/auth.ts. Meia configuração não exige desafio nenhum: exigir um
+      que a tela não tem como montar trancaria para fora quem errasse a senha
+      uma vez. */
+  TURNSTILE_SECRET_KEY?: string;
+  /** Site key do Turnstile. Pública (vai no HTML); declarada em wrangler.jsonc.
+      O servidor a devolve junto do aviso de desafio, para a tela montar o widget
+      sem precisar dela no build. */
+  TURNSTILE_SITE_KEY?: string;
   /** Chave para cifrar segredos em repouso (repository_token). Secret:
    *  `npx wrangler secret put TOKEN_ENC_KEY`. Sem ela, tokens são gravados em
    *  texto claro (fallback legado) — configure em produção. */
@@ -60,6 +78,16 @@ export type Bindings = {
   RESEND_API_KEY?: string;
   /** Analytics Engine. Opcional: sem o binding, a métrica é ignorada. */
   ANALYTICS?: AnalyticsEngineDataset;
+  /** SHA do commit publicado. Injetada no deploy; ausente em dev e em teste. */
+  VERSAO_SHA?: string;
+  /** Chave PRIVADA (PKCS#8 base64) que assina o export de portabilidade. Secret. */
+  EXPORT_SIGNING_KEY?: string;
+  /** Chave PÚBLICA correspondente, em JWK. `var`, não secret — é para publicar. */
+  EXPORT_PUBLIC_KEY?: string;
+  /** Metadados da versão publicada (binding nativo do Workers). */
+  CF_VERSION_METADATA?: { id?: string; tag?: string; timestamp?: string };
+  /** Bucket da trilha de auditoria arquivada (src/trilha.ts). */
+  TRILHA?: R2Bucket;
 };
 
 export type Variables = {
@@ -72,21 +100,30 @@ export type Variables = {
     email: string;
     name?: string;
     role: string;
-    client_lead_id?: string | null;
     client_project_id?: string | null;
     /** Sessão autenticada por senha mas ainda sem o segundo fator. */
     mfa_pending?: boolean;
     /** Instante de emissão, usado para revogação. */
     iat?: number;
+    /** Última atividade vista pelo middleware; relógio da expiração por inatividade. */
+    seen?: number;
   };
 };
 
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-// 0. Cabecalhos de seguranca. Vem antes de tudo para valer inclusive nos erros
-// e no catch-all estatico. O middleware ja aplica por padrao nosniff,
-// X-Frame-Options, Referrer-Policy e Cross-Origin-*; abaixo so o que diverge.
+// 0. Cabecalhos de seguranca. Vem antes de tudo para valer inclusive nos erros.
+// O middleware ja aplica por padrao nosniff, X-Frame-Options, Referrer-Policy e
+// Cross-Origin-*; abaixo so o que diverge.
+//
+// NAO vale para ARQUIVO ESTATICO. O comentario aqui dizia que sim ("inclusive no
+// catch-all estatico") e estava errado: sem `assets.run_worker_first`, o Workers
+// Assets responde ao arquivo ANTES de o Worker rodar, e este middleware nunca ve
+// a requisicao. O HTML — o documento que carrega e executa os scripts — saia sem
+// CSP nenhum. Os mesmos cabecalhos vivem em `frontend/public/_headers`, e
+// `test/cabecalhos-assets.test.ts` falha se os dois divergirem. Mudou aqui, muda
+// la.
 app.use('*', secureHeaders({
   // 1 ano, o minimo exigido para elegibilidade a lista de preload do HSTS.
   // Nao emitimos a diretiva `preload`: entrar na lista e um caminho so de ida
@@ -104,11 +141,23 @@ app.use('*', secureHeaders({
     // inline nem <script> inline: quebram sob este CSP e reabrem o buraco.
     // (style-src mantém 'unsafe-inline' — os atributos style="" são pervasivos
     // e de baixo risco; nonce não cobre atributo de estilo.)
-    scriptSrc: ["'self'"],
+    // `challenges.cloudflare.com` é o desafio anti-abuso do login: o Turnstile
+    // carrega o próprio script de lá e monta um iframe no mesmo domínio (exigência
+    // documentada). São as duas únicas origens de terceiro no CSP, e só existem
+    // porque o widget não roda de outro jeito.
+    scriptSrc: ["'self'", 'https://challenges.cloudflare.com'],
     styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
     fontSrc: ["'self'", 'https://fonts.gstatic.com'],
     imgSrc: ["'self'", 'data:', 'blob:'],
     connectSrc: ["'self'"],
+    // `blob:` aqui é o preview de PDF de evidência: o arquivo é baixado pela
+    // API, vira Object URL e é mostrado num iframe (frontend/src/globals.js).
+    // Sem `frame-src`, a diretiva cai para `default-src 'self'`, e `blob:` não é
+    // `'self'` — o navegador bloqueava com violação de `frame-src`, conferido no
+    // ar antes e depois desta linha. O `srcdoc` do preview de proposta não passa
+    // por aqui (herda a política do pai), e foi conferido do mesmo jeito.
+    // Baixar não precisa de diretiva: `<a download href="blob:">` é navegação.
+    frameSrc: ["'self'", 'blob:', 'https://challenges.cloudflare.com'],
     // Estas valem mesmo com 'unsafe-inline': fecham injecao de <base>, de
     // plugin, exfiltracao por <form action> e clickjacking por iframe.
     objectSrc: ["'none'"],
@@ -189,8 +238,33 @@ app.use('*', async (c, next) => {
   metrica(c.env, [String(c.res.status)], [c.req.method, rota], [duracao]);
 });
 
-// 2. Health check (público)
-app.get('/health', (c) => c.json({ status: 'ok' }));
+/*
+ * Health check (público), agora com VERSÃO (item 0.2 do enterprise-grade-plan.md).
+ *
+ * O `AGENTS.md` dizia, com razão, que `/health` não distinguia versão: ele
+ * respondia `{"status":"ok"}` com código velho igual a código novo, e por isso a
+ * sonda de "está em produção?" precisava de uma heurística — mandar um login
+ * vazio e olhar o formato do erro. Isso funciona, mas é frágil: o dia em que o
+ * envelope de validação mudar, a sonda passa a mentir.
+ *
+ * `VERSAO_SHA` é injetada no deploy (`wrangler deploy --var VERSAO_SHA:<sha>`),
+ * não lida de arquivo: não há build step que a escreva, e um arquivo versionado
+ * com o próprio SHA seria impossível de manter correto. Em `wrangler dev` e nos
+ * testes a var não existe e o campo vem `"dev"` — o que é a verdade, não um
+ * placeholder.
+ *
+ * `version_metadata` acrescenta o id da versão publicada, que distingue dois
+ * deploys do MESMO commit (re-run do workflow, rollback e volta).
+ */
+app.get('/health', (c) => {
+  const meta = (c.env as { CF_VERSION_METADATA?: { id?: string; timestamp?: string } }).CF_VERSION_METADATA;
+  return c.json({
+    status: 'ok',
+    version: (c.env as { VERSAO_SHA?: string }).VERSAO_SHA ?? 'dev',
+    deployment_id: meta?.id ?? null,
+    deployed_at: meta?.timestamp ?? null,
+  });
+});
 
 // 2c. Teto automático de linhas em SELECT sem LIMIT. Antes de tudo que consulta.
 app.use('*', queryCapMiddleware);
@@ -203,6 +277,14 @@ app.route('/api/v1/auth', authApp);
 
 // 4. Public sub-router (público)
 app.route('/api/v1/public', publicApp);
+
+/*
+ * SCIM 2.0 (item 4.2). Montado em `/scim/v2/*` — o caminho que a RFC 7644
+ * padroniza e que os IdPs esperam — e ANTES do `authMiddleware` de propósito: o
+ * autenticador ali é um token por tenant, não uma sessão de usuário. Misturar os
+ * dois faria o caminho de sessão carregar um caso que não é dele.
+ */
+app.route('/scim/v2', scimApp);
 
 // 5. Auth Middleware para demais rotas /api/v1
 app.use('/api/v1/*', authMiddleware);
@@ -220,6 +302,7 @@ app.route('/api/v1/admin/users', usersApp);
 
 // MFA fica DEPOIS do authMiddleware: exige sessão de senha já estabelecida.
 app.route('/api/v1/auth/mfa', mfaApp);
+app.route('/api/v1/auth/sessao', sessaoApp);
 
 app.route('/api/v1/leads', leadsApp);
 app.route('/api/v1/proposals', proposalsApp);
@@ -231,6 +314,10 @@ app.route('/api/v1/projects/:projectId/phase-answers', projectPhaseAnswersApp);
 app.route('/api/v1/projects/:projectId/journey-dossier', journeyDossierApp);
 app.route('/api/v1/projects/:projectId/control-adequacao', controlAdequacaoApp);
 app.route('/api/v1/controls', controlsApp);
+// Documentos legais: a rota de pendencia/aceite precisa continuar alcancavel
+// quando ha bloqueio material, senao o usuario barrado nao tem como sair dele
+// (ver legal-policy.ts).
+app.route('/api/v1/legal', legalApp);
 
 app.route('/api/v1/evidence', evidenceApp);
 app.route('/api/v1/projects/:projectId/evidence', projectEvidenceApp);
@@ -259,6 +346,19 @@ app.route('/api/v1', aiApp);
 app.route('/api/v1', governanceApp);
 app.route('/api/v1', auditorApp);
 app.route('/api/v1', platformApp);
+
+/*
+ * Contrato da API (item 3.1 do enterprise-grade-plan.md).
+ *
+ * Montado AQUI, depois do `authMiddleware`, e não junto do `/health`: exige
+ * sessão. Um OpenAPI público é o normal em API aberta; esta não é. O documento
+ * enumera caminho, método e a forma exata de cada corpo aceito — é mapa de
+ * superfície de ataque, e entregá-lo a quem não autenticou não compra nada.
+ * Quem consome (o mcp-server-niso) já autentica.
+ *
+ * `origem` sai da própria requisição para o `servers` não mentir em staging.
+ */
+app.get('/api/v1/openapi.json', (c) => c.json(documentoOpenApi(new URL(c.req.url).origin)));
 
 
 app.route('', risks);
@@ -295,6 +395,20 @@ app.get('/*', async (c) => {
 // 8. Handler de erro global: garante corpo JSON consistente em erros não capturados
 // e evita vazar detalhes internos ao cliente (o detalhe só é incluído se ENVIRONMENT for EXPLICITAMENTE 'development' ou 'test').
 app.onError((err, c) => {
+  // Negação de acesso NUNCA é 500. `requireResourceAccess` e
+  // `requireProjectAccess` sinalizam por exceção com o prefixo `Forbidden:`, e
+  // cada handler traduz isso para 403 no próprio catch — quando tem um. Onde a
+  // chamada ficou fora do try (ou não há try algum), a recusa escapava para cá
+  // e o cliente recebia 500: contrato errado e, pior, recusa de rotina contando
+  // como erro de servidor na taxa de 5xx que a operação monitora. Traduzir aqui
+  // fecha a classe inteira, inclusive para o handler que ainda não existe. O
+  // prefixo `Forbidden:` (COM os dois-pontos) é string nossa, produzida só
+  // pelas duas guardas em helpers.ts — nunca vem do usuário. Casar `Forbidden`
+  // sem o separador devolveria ao cliente a mensagem de qualquer Error que
+  // começasse com essa palavra.
+  if (err instanceof Error && err.message.startsWith('Forbidden:')) {
+    return c.json({ error: err.message }, 403);
+  }
   // Tudo aqui é defensivo de propósito: um handler de erro que estoura
   // substitui um 500 informativo por um erro sem corpo. O contexto pode estar
   // incompleto justamente porque a falha aconteceu cedo.
@@ -315,4 +429,21 @@ app.onError((err, c) => {
   return c.json({ error: 'Erro interno do servidor', ...(detail ? { detail } : {}) }, 500);
 });
 
-export default app;
+/**
+ * O worker precisa expor `fetch` E `scheduled`. O default continua sendo o app
+ * do Hono — só ganha o `scheduled` por cima.
+ *
+ * Escrito assim, e não como um objeto novo `{ fetch, scheduled }`, porque o app
+ * é importado como default por ~20 arquivos de teste e parte deles usa o helper
+ * `.request()` do Hono, que um objeto novo não teria. Trocar o formato do export
+ * custaria editar testes que esta mudança não tem motivo para tocar.
+ *
+ * `scheduled` é o cron de manutenção (ver `src/manutencao.ts` e o bloco
+ * `triggers` do `wrangler.jsonc`). O `waitUntil` mantém a invocação viva até a
+ * rotina terminar — sem ele o runtime pode encerrá-la no meio do DELETE.
+ */
+export default Object.assign(app, {
+  scheduled: (_evento: ScheduledController, env: Bindings, ctx: ExecutionContext) => {
+    ctx.waitUntil(manutencaoDiaria(env));
+  },
+});

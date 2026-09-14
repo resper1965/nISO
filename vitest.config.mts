@@ -46,16 +46,28 @@ export default defineConfig({
       all: true,
       reporter: ['text-summary', 'html', 'json-summary', 'lcov'],
       reportsDirectory: 'coverage',
-      // Piso de catraca fixado alguns pontos abaixo do atingido (2026-08:
-      // ~61.1% stmts / 47.1% br / 67.4% fn / 63.4% lines, após os testes de
-      // isolamento de tenant nas rotas de projeto, de `ForbiddenError` e de
-      // validação dos writes que liam JSON cru) para barrar REGRESSAO sem
-      // inventar meta. Subir junto conforme os testes crescem.
+      // Piso de catraca fixado alguns pontos abaixo do atingido para barrar
+      // REGRESSAO sem inventar meta. Subir junto conforme os testes crescem.
+      //
+      // 2026-08: ~55.8% stmts / 43% br / 62.6% fn / 57.7% lines, após os testes
+      //   de agents/ (assessment, evidence) e services/ RAG.
+      // 2026-09: 65.5% stmts / 54.1% br / 72.4% fn / 68.0% lines, ao fim da
+      //   onda 1 do plano — contrato de isolamento das rotas de topo,
+      //   inventário de IDOR, portfólio/portal do cliente e o CRUD dos seis
+      //   módulos de projeto.
       thresholds: {
-        statements: 58,
-        branches: 45,
-        functions: 65,
-        lines: 61,
+        // 2026-09-06: o alvo do item 1.5 do enterprise-grade-plan.md (~70/55/72/70)
+        // foi batido nas QUATRO métricas — 70,71 / 58,33 / 77,35 / 73,21 — depois
+        // de cobrir o funil comercial (`routes/assessments.ts` saiu de 15,7%),
+        // SSO, SCIM, política por tenant, trilha e portabilidade.
+        //
+        // O piso fica um ponto abaixo do atingido: barra REGRESSÃO sem
+        // transformar flutuação normal em CI vermelho. Sobe junto quando os
+        // testes crescerem — nunca desce para caber num resultado pior.
+        statements: 69,
+        branches: 57,
+        functions: 76,
+        lines: 72,
       },
     },
   },
