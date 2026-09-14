@@ -103,9 +103,17 @@ export type Variables = {
 
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-// 0. Cabecalhos de seguranca. Vem antes de tudo para valer inclusive nos erros
-// e no catch-all estatico. O middleware ja aplica por padrao nosniff,
-// X-Frame-Options, Referrer-Policy e Cross-Origin-*; abaixo so o que diverge.
+// 0. Cabecalhos de seguranca. Vem antes de tudo para valer inclusive nos erros.
+// O middleware ja aplica por padrao nosniff, X-Frame-Options, Referrer-Policy e
+// Cross-Origin-*; abaixo so o que diverge.
+//
+// NAO vale para ARQUIVO ESTATICO. O comentario aqui dizia que sim ("inclusive no
+// catch-all estatico") e estava errado: sem `assets.run_worker_first`, o Workers
+// Assets responde ao arquivo ANTES de o Worker rodar, e este middleware nunca ve
+// a requisicao. O HTML — o documento que carrega e executa os scripts — saia sem
+// CSP nenhum. Os mesmos cabecalhos vivem em `frontend/public/_headers`, e
+// `test/cabecalhos-assets.test.ts` falha se os dois divergirem. Mudou aqui, muda
+// la.
 app.use('*', secureHeaders({
   // 1 ano, o minimo exigido para elegibilidade a lista de preload do HSTS.
   // Nao emitimos a diretiva `preload`: entrar na lista e um caminho so de ida
